@@ -1,6 +1,6 @@
 # Licenza d'Uso e Diritto d'Autore per FatureViewver
 
-**Copyright (c) 2026 Federico Coter & Alberto Aceti. Tutti i diritti riservati.**
+**Copyright (c) 2026 Federico Coter. Tutti i diritti riservati.**
 
 ## 1. Proprietà e Termini Generali
 Questo software è a codice chiuso (closed-source). Tutti i diritti d'autore e di proprietà intellettuale su FatureViewver appartengono esclusivamente agli autori. 
