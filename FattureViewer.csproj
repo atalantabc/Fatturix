@@ -14,4 +14,9 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="logo\logo100.png" />
+    <Resource Include="logo\logo50.png" />
+  </ItemGroup>
+
 </Project>
