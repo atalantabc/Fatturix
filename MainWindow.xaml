@@ -7,7 +7,7 @@
         xmlns:viewmodels="clr-namespace:FattureViewer.ViewModels"
         mc:Ignorable="d"
         Title="Visualizzatore Fatture" Height="750" Width="1200" WindowStartupLocation="CenterScreen"
-        Background="#F5F6F8" FontFamily="Segoe UI">
+        Background="#F5F6F8" FontFamily="Segoe UI" Icon="logo/logo100.png">
 
     <Window.Resources>
         <!-- Standard Light Button -->
@@ -45,8 +45,14 @@
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <Button Content="Importa ZIP" Command="{Binding ImportCommand}" Style="{StaticResource PrimaryButton}" FontWeight="Bold"/>
-                    <Button Content="Configura Regole..." Command="{Binding ConfigCommand}"/>
-                    <Button Content="Svuota Database" Command="{Binding ClearCommand}"/>
+                    
+                    <!-- Menu 3 puntini -->
+                    <Menu Background="Transparent" Margin="5" VerticalAlignment="Center">
+                        <MenuItem Header="⋮" FontSize="18" FontWeight="Bold" Padding="5,0" Foreground="#333" BorderThickness="1" BorderBrush="#CCC" Background="White">
+                            <MenuItem Header="Configura Regole..." Command="{Binding ConfigCommand}" FontSize="13"/>
+                            <MenuItem Header="Svuota Database" Command="{Binding ClearCommand}" FontSize="13" Foreground="Red"/>
+                        </MenuItem>
+                    </Menu>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -54,10 +60,10 @@
                     <TextBox Text="{Binding SearchCompany, UpdateSourceTrigger=PropertyChanged}" Width="150" Margin="0,0,15,0" VerticalContentAlignment="Center"/>
 
                     <TextBlock Text="Anno:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <TextBox Text="{Binding FilterYear, UpdateSourceTrigger=PropertyChanged}" Width="60" Margin="0,0,15,0" VerticalContentAlignment="Center"/>
+                    <TextBox Text="{Binding FilterYear, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="60" Margin="0,0,15,0" VerticalContentAlignment="Center"/>
 
                     <TextBlock Text="Mese:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                    <TextBox Text="{Binding FilterMonth, UpdateSourceTrigger=PropertyChanged}" Width="40" VerticalContentAlignment="Center"/>
+                    <TextBox Text="{Binding FilterMonth, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="40" VerticalContentAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>

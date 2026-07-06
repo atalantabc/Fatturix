@@ -9,9 +9,21 @@ namespace FattureViewer
         {
             InitializeComponent();
             this.DataContext = new MainViewModel();
+            this.Loaded += MainWindow_Loaded;
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (!Services.PasswordService.IsPasswordSet())
+            {
+                var pwdWin = new PasswordWindow(PasswordMode.Setup);
+                pwdWin.Owner = this;
+                pwdWin.ShowDialog();
+            }
         }
 
         private void TreeView_SelectedItemChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<object> e)
+
         {
             if (e.NewValue is InvoiceNode invoiceNode)
             {

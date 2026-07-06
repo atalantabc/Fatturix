@@ -185,8 +185,48 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteClear(object obj)
         {
-            _dbService.ClearAll();
-            LoadInvoices();
+            var pwdWin = new PasswordWindow(PasswordMode.Verify);
+            if (pwdWin.ShowDialog() == true)
+            {
+                // Clear the Database
+                _dbService.ClearAll();
+
+                // Clear the physical files in EXTRACT_DIR
+                try
+                {
+                    string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
+                    if (File.Exists(configPath))
+                    {
+                        string configContent = File.ReadAllText(configPath);
+                        var rules = ConfigParser.Parse(configContent);
+                        var extractRule = rules.FirstOrDefault(r => r.Action == RuleAction.ExtractDir);
+                        string extractDir = extractRule?.SourceOrPath;
+
+                        if (!string.IsNullOrEmpty(extractDir) && Directory.Exists(extractDir))
+                        {
+                            var di = new DirectoryInfo(extractDir);
+                            foreach (FileInfo file in di.GetFiles())
+                            {
+                                file.Delete();
+                            }
+                            foreach (DirectoryInfo dir in di.GetDirectories())
+                            {
+                                dir.Delete(true);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("Errore durante la pulizia dei file: " + ex.Message);
+                }
+
+                // Reset UI
+                SelectedInvoice = null;
+                InvoiceXmlContent = "";
+                InvoiceHtmlContent = "";
+                LoadInvoices();
+            }
         }
 
         private void LoadInvoiceContent()

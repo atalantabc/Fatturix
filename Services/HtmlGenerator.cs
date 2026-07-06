@@ -49,7 +49,8 @@ namespace FattureViewer.Services
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='utf-8'><style>");
+            sb.AppendLine("<html><head><meta http-equiv='Content-Type' content='text/html;charset=UTF-8'>");
+            sb.AppendLine("<style>");
             sb.AppendLine("body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; margin: 0; padding: 20px; color: #000; }");
             sb.AppendLine("table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }");
             sb.AppendLine("th, td { border: 1px solid #000; padding: 5px; text-align: left; vertical-align: top; }");
@@ -61,7 +62,48 @@ namespace FattureViewer.Services
             sb.AppendLine(".col-left { padding-right: 5px; }");
             sb.AppendLine(".col-right { padding-left: 5px; }");
             sb.AppendLine(".num-right { text-align: right; }");
-            sb.AppendLine("</style></head><body>");
+            
+            // Custom context menu styles
+            sb.AppendLine("#customContextMenu {");
+            sb.AppendLine("    display: none; position: absolute; background-color: white;");
+            sb.AppendLine("    border: 1px solid #ccc; box-shadow: 2px 2px 5px rgba(0,0,0,0.2);");
+            sb.AppendLine("    z-index: 1000; min-width: 150px; font-family: 'Segoe UI'; font-size: 13px;");
+            sb.AppendLine("}");
+            sb.AppendLine("#customContextMenu div { padding: 8px 15px; cursor: pointer; color: #333; }");
+            sb.AppendLine("#customContextMenu div:hover { background-color: #0078D7; color: white; }");
+            
+            sb.AppendLine("</style>");
+            sb.AppendLine("<script>");
+            sb.AppendLine("window.onerror = function() { return true; };");
+            sb.AppendLine("function printPreview() {");
+            sb.AppendLine("    try {");
+            sb.AppendLine("        var OLECMDID_PRINTPREVIEW = 7; var PROMPT = 1;");
+            sb.AppendLine("        var wb = document.getElementById('ieWebBrowserControl');");
+            sb.AppendLine("        if(!wb) { document.body.insertAdjacentHTML('beforeend', '<OBJECT ID=\"ieWebBrowserControl\" WIDTH=0 HEIGHT=0 CLASSID=\"CLSID:8856F961-340A-11D0-A96B-00C04FD705A2\"></OBJECT>'); wb = document.getElementById('ieWebBrowserControl'); }");
+            sb.AppendLine("        wb.ExecWB(OLECMDID_PRINTPREVIEW, PROMPT);");
+            sb.AppendLine("    } catch(e) { window.print(); }");
+            sb.AppendLine("    hideMenu();");
+            sb.AppendLine("}");
+            sb.AppendLine("function hideMenu() { var m = document.getElementById('customContextMenu'); if(m) m.style.display = 'none'; }");
+            sb.AppendLine("document.oncontextmenu = function(e) {");
+            sb.AppendLine("    var evt = e || window.event;");
+            sb.AppendLine("    if(evt.preventDefault) { evt.preventDefault(); } else { evt.returnValue = false; }");
+            sb.AppendLine("    var m = document.getElementById('customContextMenu');");
+            sb.AppendLine("    var px = evt.pageX || (evt.clientX + (document.documentElement.scrollLeft || document.body.scrollLeft));");
+            sb.AppendLine("    var py = evt.pageY || (evt.clientY + (document.documentElement.scrollTop || document.body.scrollTop));");
+            sb.AppendLine("    m.style.left = px + 'px'; m.style.top = py + 'px'; m.style.display = 'block';");
+            sb.AppendLine("};");
+            sb.AppendLine("document.onclick = hideMenu;");
+            sb.AppendLine("</script>");
+            sb.AppendLine("</head><body>");
+            
+            // Custom context menu HTML
+            sb.AppendLine("<div id='customContextMenu'>");
+            sb.AppendLine("    <div onclick='document.execCommand(\"copy\"); hideMenu();'>Copia</div>");
+            sb.AppendLine("    <div onclick='document.execCommand(\"selectAll\"); hideMenu();'>Seleziona Tutto</div>");
+            sb.AppendLine("    <div style='border-top: 1px solid #eee;' onclick='window.print(); hideMenu();'>Stampa...</div>");
+            sb.AppendLine("    <div onclick='printPreview();'>Anteprima di stampa</div>");
+            sb.AppendLine("</div>");
 
             // Header Boxes (Mittente / Destinatario)
             sb.AppendLine("<div class='grid-2'>");
