@@ -25,13 +25,7 @@ FattureViewer è un'applicazione desktop moderna in C# (WPF) progettata per impo
 
 ## 💻 Come avviare l'applicazione
 
-Assicurati di avere installato l'SDK di .NET 6.
-
-1. Apri il terminale (o PowerShell) nella cartella principale del progetto.
-2. Usa il seguente comando per compilare ed eseguire il programma:
-   ```bash
-   dotnet run
-   ```
+Usare apposito installer sulle release.
 
 ## ⚙️ Regole di Configurazione (config.txt)
 
