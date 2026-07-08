@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>logo\logo.ico</ApplicationIcon>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Version>2.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +19,11 @@
   <ItemGroup>
     <Resource Include="logo\logo100.png" />
     <Resource Include="logo\logo50.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Installer\**\*.cs" />
+    <Compile Remove="Tests\**\*.cs" />
   </ItemGroup>
 
 </Project>

@@ -68,7 +68,7 @@ namespace FattureViewer.Services
             if (!string.IsNullOrWhiteSpace(companyName))
             {
                 string lowerQuery = companyName.ToLower();
-                result = result.Where(i => !string.IsNullOrEmpty(i.CompanyName) && i.CompanyName.ToLower().Contains(lowerQuery)).ToList();
+                result = result.Where(i => !string.IsNullOrEmpty(i.SenderName) && i.SenderName.ToLower().Contains(lowerQuery)).ToList();
             }
 
             return result.OrderByDescending(i => i.Date).ToList();

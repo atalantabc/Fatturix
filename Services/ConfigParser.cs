@@ -42,6 +42,21 @@ namespace FattureViewer.Services
                 rule.Action = RuleAction.ExtractDir;
                 rule.SourceOrPath = ExtractStringContent(line, "EXTRACT_DIR ");
             }
+            else if (line.StartsWith("PASSIVE_DIR ", StringComparison.OrdinalIgnoreCase))
+            {
+                rule.Action = RuleAction.PassiveDir;
+                rule.SourceOrPath = ExtractStringContent(line, "PASSIVE_DIR ");
+            }
+            else if (line.StartsWith("ARCHIVE_DIR ", StringComparison.OrdinalIgnoreCase))
+            {
+                rule.Action = RuleAction.ArchiveDir;
+                rule.SourceOrPath = ExtractStringContent(line, "ARCHIVE_DIR ");
+            }
+            else if (line.StartsWith("ZIP_WORK_DIR ", StringComparison.OrdinalIgnoreCase))
+            {
+                rule.Action = RuleAction.ZipWorkDir;
+                rule.SourceOrPath = ExtractStringContent(line, "ZIP_WORK_DIR ");
+            }
             else if (line.StartsWith("CREATE_DIR ", StringComparison.OrdinalIgnoreCase))
             {
                 rule.Action = RuleAction.CreateDir;

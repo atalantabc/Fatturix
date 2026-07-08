@@ -27,5 +27,8 @@ namespace FattureViewer.Models
 
         public string SenderName { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
+
+        [Ignore]
+        public bool IsValidInvoice => Year > 1 && Month > 0 && Day > 0 && !string.IsNullOrWhiteSpace(SenderName);
     }
 }

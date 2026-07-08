@@ -8,6 +8,7 @@ using Microsoft.Win32;
 using FattureViewer.Models;
 using FattureViewer.Services;
 using System.IO;
+using System.Windows;
 
 namespace FattureViewer.ViewModels
 {
@@ -131,7 +132,7 @@ namespace FattureViewer.ViewModels
                     {
                         monthNode.Invoices.Add(new InvoiceNode
                         {
-                            Name = $"{invoice.Date:dd/MM} - {invoice.CompanyName}",
+                            Name = $"{invoice.Date:dd/MM} - {invoice.SenderName}",
                             Data = invoice
                         });
                     }
@@ -151,36 +152,90 @@ namespace FattureViewer.ViewModels
         private void ExecuteImport(object obj)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
-            openFileDialog.Filter = "Zip files (*.zip)|*.zip|All files (*.*)|*.*";
+            openFileDialog.Filter = "Zip files (*.zip)|*.zip";
             if (openFileDialog.ShowDialog() == true)
             {
                 string zipPath = openFileDialog.FileName;
+                if (!zipPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var periodWindow = new ImportPeriodWindow { Owner = Application.Current?.MainWindow };
+                if (periodWindow.ShowDialog() != true)
+                    return;
                 
                 string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
-                string configContent = "EXTRACT_DIR \"C:\\Temp\\FattureEstratte\"";
-                if (File.Exists(configPath))
-                {
-                    configContent = File.ReadAllText(configPath);
-                }
-
-                // Process Zip
-                ExtractionEngine.ProcessZip(zipPath, configContent);
+                string configContent = EnsureConfigFile(configPath);
 
                 var rules = ConfigParser.Parse(configContent);
-                var extractRule = rules.FirstOrDefault(r => r.Action == RuleAction.ExtractDir);
-                string extractDir = extractRule?.SourceOrPath;
+                string zipWorkDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.ZipWorkDir, "ZipWork");
+                string archiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.ArchiveDir, "Archivio");
+                string passiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.PassiveDir, "Fatture_Passive");
+                Directory.CreateDirectory(zipWorkDir);
+                Directory.CreateDirectory(archiveDir);
+                Directory.CreateDirectory(passiveDir);
 
-                if (!string.IsNullOrEmpty(extractDir) && Directory.Exists(extractDir))
+                string localZipPath = ExtractionEngine.GetAvailablePath(Path.Combine(zipWorkDir, Path.GetFileName(zipPath)));
+                File.Copy(zipPath, localZipPath);
+
+                string extractDir = ExtractionEngine.ProcessZip(localZipPath, configContent, periodWindow.ImportYear, periodWindow.ImportMonth);
+                var newInvoices = ExtractionEngine.GetInvoiceFiles(extractDir)
+                                                  .Select(f => InvoiceParser.ParseInvoice(f))
+                                                  .Where(i => i.IsValidInvoice)
+                                                  .Select(i => ApplyImportPeriod(i, periodWindow.ImportYear, periodWindow.ImportMonth))
+                                                  .ToList();
+
+                if (!rules.Any(r => r.Action == RuleAction.Copy))
                 {
-                    var files = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories)
-                                         .Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) || 
-                                                     f.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase));
-                    
-                    var newInvoices = files.Select(f => InvoiceParser.ParseInvoice(f)).ToList();
-                    _dbService.SaveInvoices(newInvoices);
-                    LoadInvoices();
+                    foreach (var invoice in newInvoices)
+                    {
+                        string destName = $"{periodWindow.ImportYear}_{periodWindow.ImportMonth:D2}_{invoice.FileName}";
+                        File.Copy(invoice.OriginalFilePath, ExtractionEngine.GetAvailablePath(Path.Combine(passiveDir, destName)));
+                    }
                 }
+
+                _dbService.SaveInvoices(newInvoices);
+                ArchiveZip(zipPath, archiveDir, periodWindow.ImportYear, periodWindow.ImportMonth);
+                if (File.Exists(localZipPath))
+                    File.Delete(localZipPath);
+
+                LoadInvoices();
             }
+        }
+
+        private static string EnsureConfigFile(string configPath)
+        {
+            if (File.Exists(configPath))
+                return File.ReadAllText(configPath);
+
+            string content = GetDefaultConfig();
+            File.WriteAllText(configPath, content);
+            return content;
+        }
+
+        private static string GetDefaultConfig()
+        {
+            return "EXTRACT_DIR \"Estratti\"\r\n" +
+                   "PASSIVE_DIR \"Fatture_Passive\"\r\n" +
+                   "ARCHIVE_DIR \"Archivio\"\r\n" +
+                   "ZIP_WORK_DIR \"ZipWork\"\r\n" +
+                   "COPY \"*.xml\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"\r\n" +
+                   "COPY \"*.p7m\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"";
+        }
+
+        public static InvoiceData ApplyImportPeriod(InvoiceData invoice, int year, int month)
+        {
+            invoice.Date = new DateTime(year, month, 1);
+            invoice.Year = year;
+            invoice.Month = month;
+            invoice.Day = 1;
+            return invoice;
+        }
+
+        private static void ArchiveZip(string zipPath, string archiveDir, int year, int month)
+        {
+            string archiveName = $"{year}_{month:D2}.zip";
+            string archivePath = ExtractionEngine.GetAvailablePath(Path.Combine(archiveDir, archiveName));
+            File.Move(zipPath, archivePath);
         }
 
         private void ExecuteClear(object obj)

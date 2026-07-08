@@ -5,6 +5,9 @@ namespace FattureViewer.Models
     public enum RuleAction
     {
         ExtractDir,
+        PassiveDir,
+        ArchiveDir,
+        ZipWorkDir,
         Copy,
         Move,
         CreateDir

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography.Pkcs;
@@ -29,6 +30,9 @@ namespace FattureViewer.Services
 
                 // Parse XML
                 XDocument doc = XDocument.Parse(xmlContent);
+                if (!string.Equals(doc.Root?.Name.LocalName, "FatturaElettronica", StringComparison.OrdinalIgnoreCase))
+                    return data;
+
                 XNamespace ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
 
                 // Find Receiver (CessionarioCommittente)
@@ -75,7 +79,8 @@ namespace FattureViewer.Services
                     if (datiGenerali != null)
                     {
                         var dateStr = datiGenerali.Element(ns + "Data")?.Value;
-                        if (DateTime.TryParse(dateStr, out DateTime parsedDate))
+                        if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate) ||
+                            DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate))
                         {
                             data.Date = parsedDate;
                             data.Year = parsedDate.Year;
