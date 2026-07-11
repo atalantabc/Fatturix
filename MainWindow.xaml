@@ -49,7 +49,7 @@
                     <!-- Menu 3 puntini -->
                     <Menu Background="Transparent" Margin="5" VerticalAlignment="Center">
                         <MenuItem Header="⋮" FontSize="18" FontWeight="Bold" Padding="5,0" Foreground="#333" BorderThickness="1" BorderBrush="#CCC" Background="White">
-                            <MenuItem Header="Configura Regole..." Command="{Binding ConfigCommand}" FontSize="13"/>
+                            <MenuItem Header="Imposta percorso Fatture Passive..." Command="{Binding SetPathCommand}" FontSize="13"/>
                             <MenuItem Header="Svuota Database" Command="{Binding ClearCommand}" FontSize="13" Foreground="Red"/>
                         </MenuItem>
                     </Menu>
@@ -84,6 +84,16 @@
                       BorderBrush="#CCCCCC"
                       BorderThickness="1"
                       Margin="0,0,5,0">
+                <TreeView.Style>
+                    <Style TargetType="{x:Type TreeView}">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFlatSearch}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TreeView.Style>
                 <TreeView.Resources>
                     <HierarchicalDataTemplate DataType="{x:Type viewmodels:YearNode}" ItemsSource="{Binding Months}">
                         <StackPanel Orientation="Horizontal" Margin="2">
@@ -112,6 +122,42 @@
                     </Style>
                 </TreeView.ItemContainerStyle>
             </TreeView>
+            <ListBox Grid.Column="0"
+                     ItemsSource="{Binding FlatSearchResults}"
+                     SelectedItem="{Binding SelectedInvoice, Mode=TwoWay}"
+                     Background="White"
+                     BorderBrush="#CCCCCC"
+                     BorderThickness="1"
+                     Margin="0,0,5,0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.Style>
+                    <Style TargetType="{x:Type ListBox}">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFlatSearch}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.Style>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="{x:Type ListBoxItem}">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="85"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Date, StringFormat={}{0:dd/MM/yyyy}}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="{Binding SenderName}" TextWrapping="Wrap"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" Background="Transparent"/>
 

@@ -14,6 +14,8 @@ namespace FattureViewer.ViewModels
 {
     public class MainViewModel : INotifyPropertyChanged
     {
+        private const string SettingsRegistryPath = @"HKEY_CURRENT_USER\Software\FattureViewer";
+        private const string PassiveDirectoryValue = "FatturePassiveDirectory";
         private readonly DatabaseService _dbService;
 
         public MainViewModel()
@@ -23,7 +25,7 @@ namespace FattureViewer.ViewModels
             
             ImportCommand = new RelayCommand(ExecuteImport);
             ClearCommand = new RelayCommand(ExecuteClear);
-            ConfigCommand = new RelayCommand(ExecuteConfig);
+            SetPathCommand = new RelayCommand(ExecuteSetPath);
         }
 
         private ObservableCollection<InvoiceData> _invoices;
@@ -38,6 +40,19 @@ namespace FattureViewer.ViewModels
         {
             get => _invoiceTree;
             set { _invoiceTree = value; OnPropertyChanged(); }
+        }
+        private ObservableCollection<InvoiceData> _flatSearchResults;
+        public ObservableCollection<InvoiceData> FlatSearchResults
+        {
+            get => _flatSearchResults;
+            set { _flatSearchResults = value; OnPropertyChanged(); }
+        }
+
+        private bool _isFlatSearch;
+        public bool IsFlatSearch
+        {
+            get => _isFlatSearch;
+            set { _isFlatSearch = value; OnPropertyChanged(); }
         }
 
         private InvoiceData _selectedInvoice;
@@ -85,7 +100,7 @@ namespace FattureViewer.ViewModels
 
         public ICommand ImportCommand { get; }
         public ICommand ClearCommand { get; }
-        public ICommand ConfigCommand { get; }
+        public ICommand SetPathCommand { get; }
 
         private void LoadInvoices()
         {
@@ -104,6 +119,14 @@ namespace FattureViewer.ViewModels
         private void BuildTree(System.Collections.Generic.List<InvoiceData> list)
         {
             var tree = new ObservableCollection<YearNode>();
+            IsFlatSearch = ShouldUseFlatSearch(SearchCompany, FilterMonth);
+            FlatSearchResults = new ObservableCollection<InvoiceData>(
+                IsFlatSearch ? list.OrderByDescending(i => i.Date) : Enumerable.Empty<InvoiceData>());
+            if (IsFlatSearch)
+            {
+                InvoiceTree = tree;
+                return;
+            }
             int currentYear = DateTime.Now.Year;
             int currentMonth = DateTime.Now.Month;
 
@@ -142,15 +165,56 @@ namespace FattureViewer.ViewModels
             }
             InvoiceTree = tree;
         }
-
-        private void ExecuteConfig(object obj)
+        public static bool ShouldUseFlatSearch(string companyName, int? month)
         {
-            var configWin = new ConfigWindow();
-            configWin.ShowDialog();
+            return !string.IsNullOrWhiteSpace(companyName) && !month.HasValue;
+        }
+
+        private void ExecuteSetPath(object obj)
+        {
+            string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
+                "Inserisci il percorso della cartella Fatture Passive. Verrà salvato e usato per tutte le importazioni:",
+                "Imposta percorso Fatture Passive",
+                GetSavedPassiveDirectory());
+            if (string.IsNullOrWhiteSpace(selectedPath))
+                return;
+
+            if (!TryGetPassiveDirectories(selectedPath, out string passiveDir, out _))
+            {
+                MessageBox.Show("Questa cartella data non è la cartella fatture passive", "Errore", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            try
+            {
+                Registry.SetValue(SettingsRegistryPath, PassiveDirectoryValue, passiveDir);
+                MessageBox.Show(
+                    $"Percorso salvato e usato per tutte le importazioni:\n\n{passiveDir}\n\nPuoi cambiarlo in qualsiasi momento da 'Imposta percorso Fatture Passive'.",
+                    "Percorso salvato",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Errore durante il salvataggio del percorso: " + ex.Message, "Errore", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void ExecuteImport(object obj)
         {
+            string selectedPassiveDir = GetSavedPassiveDirectory();
+            if (string.IsNullOrWhiteSpace(selectedPassiveDir))
+            {
+                MessageBox.Show("Imposta prima il percorso Fatture Passive dal menu con i tre puntini.", "Percorso mancante", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!TryGetPassiveDirectories(selectedPassiveDir, out string externalPassiveDir, out string archiveDir))
+            {
+                MessageBox.Show("Questa cartella data non è la cartella fatture passive", "Errore", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "Zip files (*.zip)|*.zip";
             if (openFileDialog.ShowDialog() == true)
@@ -167,21 +231,18 @@ namespace FattureViewer.ViewModels
                 string configContent = EnsureConfigFile(configPath);
 
                 var rules = ConfigParser.Parse(configContent);
-                string zipWorkDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.ZipWorkDir, "ZipWork");
-                string archiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.ArchiveDir, "Archivio");
-                string passiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.PassiveDir, "Fatture_Passive");
-                Directory.CreateDirectory(zipWorkDir);
-                Directory.CreateDirectory(archiveDir);
-                Directory.CreateDirectory(passiveDir);
+                string internalPassiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.PassiveDir, "Fatture_Passive");
+                Directory.CreateDirectory(internalPassiveDir);
 
-                string localZipPath = ExtractionEngine.GetAvailablePath(Path.Combine(zipWorkDir, Path.GetFileName(zipPath)));
-                File.Copy(zipPath, localZipPath);
+                string importedZipPath = ExtractionEngine.GetAvailablePath(Path.Combine(externalPassiveDir, Path.GetFileName(zipPath)));
+                File.Copy(zipPath, importedZipPath);
 
-                string extractDir = ExtractionEngine.ProcessZip(localZipPath, configContent, periodWindow.ImportYear, periodWindow.ImportMonth);
-                var newInvoices = ExtractionEngine.GetInvoiceFiles(extractDir)
+                string extractDir = ExtractionEngine.ProcessZip(importedZipPath, configContent, externalPassiveDir, out var extractedFiles);
+                var newInvoices = extractedFiles
+                                                  .Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+                                                              f.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
                                                   .Select(f => InvoiceParser.ParseInvoice(f))
                                                   .Where(i => i.IsValidInvoice)
-                                                  .Select(i => ApplyImportPeriod(i, periodWindow.ImportYear, periodWindow.ImportMonth))
                                                   .ToList();
 
                 if (!rules.Any(r => r.Action == RuleAction.Copy))
@@ -189,14 +250,13 @@ namespace FattureViewer.ViewModels
                     foreach (var invoice in newInvoices)
                     {
                         string destName = $"{periodWindow.ImportYear}_{periodWindow.ImportMonth:D2}_{invoice.FileName}";
-                        File.Copy(invoice.OriginalFilePath, ExtractionEngine.GetAvailablePath(Path.Combine(passiveDir, destName)));
+                        File.Copy(invoice.OriginalFilePath, ExtractionEngine.GetAvailablePath(Path.Combine(internalPassiveDir, destName)));
                     }
                 }
 
                 _dbService.SaveInvoices(newInvoices);
-                ArchiveZip(zipPath, archiveDir, periodWindow.ImportYear, periodWindow.ImportMonth);
-                if (File.Exists(localZipPath))
-                    File.Delete(localZipPath);
+                CopyExtractedFilesToArchive(extractedFiles, extractDir, archiveDir, periodWindow.ImportYear, periodWindow.ImportMonth);
+                ArchiveZip(importedZipPath, archiveDir, periodWindow.ImportYear, periodWindow.ImportMonth);
 
                 LoadInvoices();
             }
@@ -204,9 +264,6 @@ namespace FattureViewer.ViewModels
 
         private static string EnsureConfigFile(string configPath)
         {
-            if (File.Exists(configPath))
-                return File.ReadAllText(configPath);
-
             string content = GetDefaultConfig();
             File.WriteAllText(configPath, content);
             return content;
@@ -214,26 +271,55 @@ namespace FattureViewer.ViewModels
 
         private static string GetDefaultConfig()
         {
-            return "EXTRACT_DIR \"Estratti\"\r\n" +
-                   "PASSIVE_DIR \"Fatture_Passive\"\r\n" +
-                   "ARCHIVE_DIR \"Archivio\"\r\n" +
-                   "ZIP_WORK_DIR \"ZipWork\"\r\n" +
+            return "PASSIVE_DIR \"Fatture_Passive\"\r\n" +
                    "COPY \"*.xml\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"\r\n" +
                    "COPY \"*.p7m\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"";
         }
-
-        public static InvoiceData ApplyImportPeriod(InvoiceData invoice, int year, int month)
+        private static string GetSavedPassiveDirectory()
         {
-            invoice.Date = new DateTime(year, month, 1);
-            invoice.Year = year;
-            invoice.Month = month;
-            invoice.Day = 1;
-            return invoice;
+            return Registry.GetValue(SettingsRegistryPath, PassiveDirectoryValue, "") as string ?? "";
+        }
+
+
+        public static bool TryGetPassiveDirectories(string selectedPath, out string passiveDir, out string archiveDir)
+        {
+            passiveDir = "";
+            archiveDir = "";
+
+            if (string.IsNullOrWhiteSpace(selectedPath))
+                return false;
+
+            try
+            {
+                passiveDir = Path.GetFullPath(selectedPath.Trim());
+                archiveDir = Path.Combine(passiveDir, "Archivio");
+                return Directory.Exists(passiveDir) && Directory.Exists(archiveDir);
+            }
+            catch
+            {
+                passiveDir = "";
+                archiveDir = "";
+                return false;
+            }
+        }
+
+        public static void CopyExtractedFilesToArchive(System.Collections.Generic.IEnumerable<string> files, string extractDir, string archiveDir, int year, int month)
+        {
+            string targetDir = Path.Combine(archiveDir, $"{year}-{month}");
+            Directory.CreateDirectory(targetDir);
+
+            foreach (var file in files)
+            {
+                string relativePath = Path.GetRelativePath(extractDir, file);
+                string targetPath = Path.Combine(targetDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                File.Copy(file, ExtractionEngine.GetAvailablePath(targetPath));
+            }
         }
 
         private static void ArchiveZip(string zipPath, string archiveDir, int year, int month)
         {
-            string archiveName = $"{year}_{month:D2}.zip";
+            string archiveName = $"{year}-{month}.zip";
             string archivePath = ExtractionEngine.GetAvailablePath(Path.Combine(archiveDir, archiveName));
             File.Move(zipPath, archivePath);
         }
@@ -245,36 +331,6 @@ namespace FattureViewer.ViewModels
             {
                 // Clear the Database
                 _dbService.ClearAll();
-
-                // Clear the physical files in EXTRACT_DIR
-                try
-                {
-                    string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
-                    if (File.Exists(configPath))
-                    {
-                        string configContent = File.ReadAllText(configPath);
-                        var rules = ConfigParser.Parse(configContent);
-                        var extractRule = rules.FirstOrDefault(r => r.Action == RuleAction.ExtractDir);
-                        string extractDir = extractRule?.SourceOrPath;
-
-                        if (!string.IsNullOrEmpty(extractDir) && Directory.Exists(extractDir))
-                        {
-                            var di = new DirectoryInfo(extractDir);
-                            foreach (FileInfo file in di.GetFiles())
-                            {
-                                file.Delete();
-                            }
-                            foreach (DirectoryInfo dir in di.GetDirectories())
-                            {
-                                dir.Delete(true);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine("Errore durante la pulizia dei file: " + ex.Message);
-                }
 
                 // Reset UI
                 SelectedInvoice = null;

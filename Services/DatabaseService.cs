@@ -73,6 +73,7 @@ namespace FattureViewer.Services
 
             return result.OrderByDescending(i => i.Date).ToList();
         }
+
         
         public void ClearAll()
         {

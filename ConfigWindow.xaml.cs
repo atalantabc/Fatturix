@@ -31,10 +31,7 @@ namespace FattureViewer
             {
                 // Default config
                 content = "// File di configurazione generato automaticamente\r\n" +
-                          "EXTRACT_DIR \"Estratti\"\r\n" +
                           "PASSIVE_DIR \"Fatture_Passive\"\r\n" +
-                          "ARCHIVE_DIR \"Archivio\"\r\n" +
-                          "ZIP_WORK_DIR \"ZipWork\"\r\n" +
                           "COPY \"*.xml\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"\r\n" +
                           "COPY \"*.p7m\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"\r\n";
             }
@@ -68,7 +65,7 @@ namespace FattureViewer
 
         private void HighlightSyntax()
         {
-            string[] keywords = { "EXTRACT_DIR", "PASSIVE_DIR", "ARCHIVE_DIR", "ZIP_WORK_DIR", "CREATE_DIR", "COPY", "MOVE", "TO", "RENAME" };
+            string[] keywords = { "PASSIVE_DIR", "ZIP_WORK_DIR", "CREATE_DIR", "COPY", "MOVE", "TO", "RENAME" };
 
             TextPointer pointer = EditorBox.Document.ContentStart;
 

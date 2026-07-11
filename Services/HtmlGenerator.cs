@@ -25,7 +25,12 @@ namespace FattureViewer.Services
                 return "<html><body><p>Impossibile analizzare l'XML per l'anteprima formattata.</p></body></html>";
             }
 
-            XNamespace ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+            if (doc.Root != null)
+            {
+                foreach (var element in doc.Root.DescendantsAndSelf().ToList())
+                    element.Name = element.Name.LocalName;
+            }
+            XNamespace ns = XNamespace.None;
             var header = doc.Descendants(ns + "FatturaElettronicaHeader").FirstOrDefault();
             var body = doc.Descendants(ns + "FatturaElettronicaBody").FirstOrDefault();
 
@@ -41,11 +46,12 @@ namespace FattureViewer.Services
             string cessionarioCap = header?.Descendants(ns + "CessionarioCommittente").Descendants(ns + "Sede").Elements(ns + "CAP").FirstOrDefault()?.Value ?? "";
             string cessionarioPIva = header?.Descendants(ns + "CessionarioCommittente").Descendants(ns + "IdFiscaleIVA").Elements(ns + "IdCodice").FirstOrDefault()?.Value ?? "";
             string cessionarioCF = header?.Descendants(ns + "CessionarioCommittente").Descendants(ns + "DatiAnagrafici").Elements(ns + "CodiceFiscale").FirstOrDefault()?.Value ?? cessionarioPIva;
+            string codiceDestinatario = header?.Descendants(ns + "CodiceDestinatario").FirstOrDefault()?.Value ?? data.RecipientCode;
 
-            var datiGenerali = body?.Element(ns + "DatiGenerali")?.Element(ns + "DatiGeneraliDocumento");
+            var datiGenerali = body?.Descendants(ns + "DatiGeneraliDocumento").FirstOrDefault();
             string tipoDoc = datiGenerali?.Element(ns + "TipoDocumento")?.Value ?? "TD01";
             string numeroFattura = datiGenerali?.Element(ns + "Numero")?.Value ?? "";
-            string causale = string.Join("<br/>", datiGenerali?.Elements(ns + "Causale").Select(x => x.Value) ?? new List<string>());
+            string causale = string.Join("<br/>", datiGenerali?.Elements(ns + "Causale").Select(x => System.Net.WebUtility.HtmlEncode(x.Value)) ?? new List<string>());
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<!DOCTYPE html>");
@@ -130,48 +136,74 @@ namespace FattureViewer.Services
 
             // General Data Table
             sb.AppendLine("<table>");
-            sb.AppendLine("<tr><th>TIPOLOGIA DOCUMENTO</th><th>CAUSALE</th><th>NUMERO FATTURA</th><th>DATA</th></tr>");
+            sb.AppendLine("<tr><th>TIPOLOGIA DOCUMENTO</th><th>CAUSALE</th><th>NUMERO FATTURA</th><th>DATA</th><th>CODICE DESTINATARIO</th></tr>");
             sb.AppendLine("<tr>");
             sb.AppendLine($"<td>{tipoDoc}</td>");
-            sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(causale)}</td>");
+            sb.AppendLine($"<td>{causale}</td>");
             sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(numeroFattura)}</td>");
             sb.AppendLine($"<td>{data.Date:dd-MM-yyyy}</td>");
+            sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(codiceDestinatario)}</td>");
             sb.AppendLine("</tr>");
             sb.AppendLine("</table>");
 
+            var referenceTypes = new[]
+            {
+                (Tag: "DatiOrdineAcquisto", Label: "Ordine acquisto", NumberTag: "IdDocumento", DateTag: "Data"),
+                (Tag: "DatiContratto", Label: "Contratto", NumberTag: "IdDocumento", DateTag: "Data"),
+                (Tag: "DatiConvenzione", Label: "Convenzione", NumberTag: "IdDocumento", DateTag: "Data"),
+                (Tag: "DatiRicezione", Label: "Ricezione", NumberTag: "IdDocumento", DateTag: "Data"),
+                (Tag: "DatiFattureCollegate", Label: "Fattura collegata", NumberTag: "IdDocumento", DateTag: "Data"),
+                (Tag: "DatiSAL", Label: "SAL", NumberTag: "RiferimentoFase", DateTag: "Data"),
+                (Tag: "DatiDDT", Label: "DDT", NumberTag: "NumeroDDT", DateTag: "DataDDT")
+            };
+            var unboundReferences = body == null ? new List<string>() : referenceTypes.SelectMany(type => body.Descendants(ns + type.Tag)
+                .Where(reference => !reference.Elements(ns + "RiferimentoNumeroLinea").Any())
+                .Select(reference => FormatReferenceDescription(type.Label,
+                    reference.Element(ns + type.NumberTag)?.Value ?? "",
+                    reference.Element(ns + type.DateTag)?.Value ?? "")))
+                .Where(reference => !string.IsNullOrWhiteSpace(reference))
+                .ToList();
+
             // Items Table
-            var linee = body?.Descendants(ns + "DettaglioLinee");
-            if (linee != null && linee.Any())
+            var linee = body?.Descendants(ns + "DettaglioLinee").ToList() ?? new List<XElement>();
+            if (linee.Count > 0 || unboundReferences.Count > 0)
             {
                 sb.AppendLine("<table>");
                 sb.AppendLine("<tr>");
-                sb.AppendLine("<th>COD.ARTICOLO</th><th>DESCRIZIONE</th><th class='num-right'>QUANTITA</th><th class='num-right'>PREZZO UNITARIO</th><th class='num-right'>%IVA</th><th class='num-right'>PREZZO TOTALE</th>");
+                sb.AppendLine("<th>COD. ARTICOLO</th><th>DESCRIZIONE</th><th class='num-right'>QUANTITA</th><th class='num-right'>PREZZO UNITARIO</th><th>UM</th><th>SCONTO / OMAGGIO</th><th class='num-right'>%IVA</th><th class='num-right'>PREZZO TOTALE</th>");
                 sb.AppendLine("</tr>");
+
+                foreach (string reference in unboundReferences)
+                    AppendDescriptionRow(sb, reference);
+
 
                 foreach (var linea in linee)
                 {
                     string codArt = linea.Descendants(ns + "CodiceArticolo").Elements(ns + "CodiceValore").FirstOrDefault()?.Value ?? "";
                     string desc = linea.Element(ns + "Descrizione")?.Value ?? "";
-                    
-                    decimal qta = 0;
-                    decimal.TryParse(linea.Element(ns + "Quantita")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out qta);
-                    
-                    decimal pu = 0;
-                    decimal.TryParse(linea.Element(ns + "PrezzoUnitario")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out pu);
-                    
-                    decimal iva = 0;
-                    decimal.TryParse(linea.Element(ns + "AliquotaIVA")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out iva);
-                    
-                    decimal pt = 0;
-                    decimal.TryParse(linea.Element(ns + "PrezzoTotale")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out pt);
+                    string unit = linea.Element(ns + "UnitaMisura")?.Value ?? "";
+                    string discount = FormatLineDiscount(linea, ns, desc);
+
+                    bool hasQuantity = decimal.TryParse(linea.Element(ns + "Quantita")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal quantity);
+                    bool hasUnitPrice = decimal.TryParse(linea.Element(ns + "PrezzoUnitario")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal unitPrice);
+                    bool hasVat = decimal.TryParse(linea.Element(ns + "AliquotaIVA")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal vat);
+                    bool hasTotal = decimal.TryParse(linea.Element(ns + "PrezzoTotale")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal total);
+                    bool isDescriptionOnly = string.IsNullOrWhiteSpace(codArt) && !hasQuantity && unitPrice == 0 && total == 0 && string.IsNullOrWhiteSpace(unit) && string.IsNullOrWhiteSpace(discount);
+                    if (isDescriptionOnly)
+                    {
+                        AppendDescriptionRow(sb, desc);
+                        continue;
+                    }
 
                     sb.AppendLine("<tr>");
                     sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(codArt)}</td>");
                     sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(desc)}</td>");
-                    sb.AppendLine($"<td class='num-right'>{qta.ToString("N2", new CultureInfo("it-IT"))}</td>");
-                    sb.AppendLine($"<td class='num-right'>{pu.ToString("N4", new CultureInfo("it-IT"))}</td>");
-                    sb.AppendLine($"<td class='num-right'>{iva.ToString("N2", new CultureInfo("it-IT"))}</td>");
-                    sb.AppendLine($"<td class='num-right'>{pt.ToString("N2", new CultureInfo("it-IT"))}</td>");
+                    sb.AppendLine($"<td class='num-right'>{(hasQuantity ? quantity.ToString("N2", new CultureInfo("it-IT")) : "")}</td>");
+                    sb.AppendLine($"<td class='num-right'>{(hasUnitPrice ? unitPrice.ToString("N4", new CultureInfo("it-IT")) : "")}</td>");
+                    sb.AppendLine($"<td>{System.Net.WebUtility.HtmlEncode(unit)}</td>");
+                    sb.AppendLine($"<td>{discount}</td>");
+                    sb.AppendLine($"<td class='num-right'>{(hasVat ? vat.ToString("N2", new CultureInfo("it-IT")) : "")}</td>");
+                    sb.AppendLine($"<td class='num-right'>{(hasTotal ? total.ToString("N2", new CultureInfo("it-IT")) : "")}</td>");
                     sb.AppendLine("</tr>");
                 }
                 sb.AppendLine("</table>");
@@ -269,6 +301,56 @@ namespace FattureViewer.Services
             sb.AppendLine("</body></html>");
 
             return sb.ToString();
+        }
+
+        private static void AppendDescriptionRow(StringBuilder sb, string description)
+        {
+            sb.AppendLine("<tr class='reference-row'>");
+            sb.AppendLine($"<td></td><td>{System.Net.WebUtility.HtmlEncode(description)}</td>");
+            sb.AppendLine("<td class='num-right'></td><td class='num-right'></td><td></td><td></td><td class='num-right'></td><td class='num-right'></td>");
+            sb.AppendLine("</tr>");
+        }
+
+        private static string FormatReferenceDescription(string label, string number, string date)
+        {
+            if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate))
+                date = parsedDate.ToString("dd-MM-yyyy");
+
+            string prefix = label == "Ordine acquisto"
+                ? number.Equals("MAIL", StringComparison.OrdinalIgnoreCase)
+                    ? "VS ordine mail"
+                    : $"VS ordine{(string.IsNullOrWhiteSpace(number) ? "" : " " + number)}"
+                : $"{label}{(string.IsNullOrWhiteSpace(number) ? "" : " " + number)}";
+            return string.IsNullOrWhiteSpace(date) ? prefix : $"{prefix} del {date}";
+        }
+
+        private static string FormatLineDiscount(XElement line, XNamespace ns, string description)
+        {
+            var values = new List<string>();
+            var culture = new CultureInfo("it-IT");
+            foreach (var discount in line.Elements(ns + "ScontoMaggiorazione"))
+            {
+                string sign = discount.Element(ns + "Tipo")?.Value == "MG" ? "+" : "-";
+                if (decimal.TryParse(discount.Element(ns + "Percentuale")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal percentage))
+                    values.Add(sign + Math.Abs(percentage).ToString("N2", culture) + "%");
+                else if (decimal.TryParse(discount.Element(ns + "Importo")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal amount))
+                    values.Add(sign + Math.Abs(amount).ToString("N2", culture));
+            }
+
+            bool isGift = description.IndexOf("omaggio", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          line.Descendants(ns + "AltriDatiGestionali").Any(value => value.Value.IndexOf("omaggio", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (isGift)
+                values.Add("OMAGGIO");
+
+            if (values.Count == 0)
+            {
+                string transferType = line.Element(ns + "TipoCessionePrestazione")?.Value ?? "";
+                string label = transferType switch { "SC" => "SCONTO", "PR" => "PREMIO", "AB" => "ABBUONO", "AC" => "SPESA ACCESSORIA", _ => "" };
+                if (!string.IsNullOrEmpty(label))
+                    values.Add(label);
+            }
+
+            return string.Join("<br/>", values.Distinct(StringComparer.OrdinalIgnoreCase).Select(System.Net.WebUtility.HtmlEncode));
         }
     }
 }

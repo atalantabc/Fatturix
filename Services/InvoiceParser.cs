@@ -25,7 +25,7 @@ namespace FattureViewer.Services
                 }
                 else
                 {
-                    xmlContent = System.Text.Encoding.UTF8.GetString(fileBytes);
+                    xmlContent = DecodeXmlBytes(fileBytes);
                 }
 
                 // Parse XML
@@ -33,52 +33,46 @@ namespace FattureViewer.Services
                 if (!string.Equals(doc.Root?.Name.LocalName, "FatturaElettronica", StringComparison.OrdinalIgnoreCase))
                     return data;
 
-                XNamespace ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-
                 // Find Receiver (CessionarioCommittente)
-                var header = doc.Descendants(ns + "FatturaElettronicaHeader").FirstOrDefault();
+                var header = Find(doc, "FatturaElettronicaHeader");
                 if (header != null)
                 {
-                    var receiver = header.Element(ns + "CessionarioCommittente")?
-                                         .Element(ns + "DatiAnagrafici")?
-                                         .Element(ns + "Anagrafica");
+                    data.RecipientCode = Find(header, "CodiceDestinatario")?.Value ?? "";
+                    var receiver = Find(Find(header, "CessionarioCommittente"), "Anagrafica");
                     if (receiver != null)
                     {
-                        var denom = receiver.Element(ns + "Denominazione")?.Value;
+                        var denom = Find(receiver, "Denominazione")?.Value;
                         if (!string.IsNullOrEmpty(denom))
                         {
                             data.CompanyName = denom;
                         }
                         else
                         {
-                            var nome = receiver.Element(ns + "Nome")?.Value;
-                            var cognome = receiver.Element(ns + "Cognome")?.Value;
+                            var nome = Find(receiver, "Nome")?.Value;
+                            var cognome = Find(receiver, "Cognome")?.Value;
                             data.CompanyName = $"{nome} {cognome}".Trim();
                         }
                     }
 
-                    var sender = header.Element(ns + "CedentePrestatore")?
-                                       .Element(ns + "DatiAnagrafici")?
-                                       .Element(ns + "Anagrafica");
+                    var sender = Find(Find(header, "CedentePrestatore"), "Anagrafica");
                     if (sender != null)
                     {
-                        var denom = sender.Element(ns + "Denominazione")?.Value;
+                        var denom = Find(sender, "Denominazione")?.Value;
                         if (!string.IsNullOrEmpty(denom))
                             data.SenderName = denom;
                         else
-                            data.SenderName = $"{sender.Element(ns + "Nome")?.Value} {sender.Element(ns + "Cognome")?.Value}".Trim();
+                            data.SenderName = $"{Find(sender, "Nome")?.Value} {Find(sender, "Cognome")?.Value}".Trim();
                     }
                 }
 
                 // Find Date
-                var body = doc.Descendants(ns + "FatturaElettronicaBody").FirstOrDefault();
+                var body = Find(doc, "FatturaElettronicaBody");
                 if (body != null)
                 {
-                    var datiGenerali = body.Element(ns + "DatiGenerali")?
-                                           .Element(ns + "DatiGeneraliDocumento");
+                    var datiGenerali = Find(body, "DatiGeneraliDocumento");
                     if (datiGenerali != null)
                     {
-                        var dateStr = datiGenerali.Element(ns + "Data")?.Value;
+                        var dateStr = Find(datiGenerali, "Data")?.Value;
                         if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate) ||
                             DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate))
                         {
@@ -88,7 +82,7 @@ namespace FattureViewer.Services
                             data.Day = parsedDate.Day;
                         }
 
-                        var totalStr = datiGenerali.Element(ns + "ImportoTotaleDocumento")?.Value;
+                        var totalStr = Find(datiGenerali, "ImportoTotaleDocumento")?.Value;
                         if (decimal.TryParse(totalStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal total))
                         {
                             data.TotalAmount = total;
@@ -106,11 +100,19 @@ namespace FattureViewer.Services
 
         public static string DecodeP7M(byte[] fileBytes)
         {
+            if (fileBytes.Length > 0 && fileBytes[0] != 0x30)
+            {
+                try
+                {
+                    fileBytes = Convert.FromBase64String(System.Text.Encoding.ASCII.GetString(fileBytes));
+                }
+                catch (FormatException) { }
+            }
             try
             {
                 var signedCms = new SignedCms();
                 signedCms.Decode(fileBytes);
-                return System.Text.Encoding.UTF8.GetString(signedCms.ContentInfo.Content);
+                return DecodeXmlBytes(signedCms.ContentInfo.Content);
             }
             catch (Exception ex)
             {
@@ -146,12 +148,24 @@ namespace FattureViewer.Services
                             int length = closeBracket - startIndex + 1;
                             byte[] xmlBytes = new byte[length];
                             Array.Copy(fileBytes, startIndex, xmlBytes, 0, length);
-                            return System.Text.Encoding.UTF8.GetString(xmlBytes);
+                            return DecodeXmlBytes(xmlBytes);
                         }
                     }
                 }
                 return string.Empty;
             }
+        }
+
+        private static XElement? Find(XContainer? parent, string localName)
+        {
+            return parent?.Descendants().FirstOrDefault(e =>
+                e.Name.LocalName.Equals(localName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string DecodeXmlBytes(byte[] bytes)
+        {
+            using var reader = new StreamReader(new MemoryStream(bytes), System.Text.Encoding.UTF8, true);
+            return reader.ReadToEnd();
         }
 
         private static int FindPattern(byte[] data, byte[] pattern, int startIndex = 0)

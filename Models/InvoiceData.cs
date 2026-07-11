@@ -26,6 +26,7 @@ namespace FattureViewer.Models
         public string CompanyName { get; set; } = string.Empty;
 
         public string SenderName { get; set; } = string.Empty;
+        public string RecipientCode { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
 
         [Ignore]

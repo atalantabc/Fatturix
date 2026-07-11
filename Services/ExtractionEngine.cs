@@ -10,19 +10,18 @@ namespace FattureViewer.Services
 {
     public class ExtractionEngine
     {
-        public static string ProcessZip(string zipFilePath, string configContent, int importYear = 0, int importMonth = 0)
+        public static string ProcessZip(string zipFilePath, string configContent, string extractDir, out List<string> extractedFiles, int importYear = 0, int importMonth = 0)
         {
             if (!zipFilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Sono supportati solo file .zip.");
 
             var rules = ConfigParser.Parse(configContent);
             
-            // 1. Find Base Extract Dir
-            var extractRule = rules.FirstOrDefault(r => r.Action == RuleAction.ExtractDir);
-            string baseExtractDir = ResolveConfiguredPath(extractRule != null ? extractRule.SourceOrPath : Path.Combine(Path.GetTempPath(), "FattureEstratte_" + Guid.NewGuid().ToString()));
-            string runExtractDir = Path.Combine(baseExtractDir, Path.GetFileNameWithoutExtension(zipFilePath) + "_" + Guid.NewGuid().ToString("N"));
+            string runExtractDir = Path.GetFullPath(extractDir);
+            extractedFiles = new List<string>();
 
             Directory.CreateDirectory(runExtractDir);
+            string extractRoot = Path.GetFullPath(runExtractDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
             // 2. Extract ZIP
             using (ZipArchive archive = ZipFile.OpenRead(zipFilePath))
@@ -31,13 +30,17 @@ namespace FattureViewer.Services
                 {
                     if (string.IsNullOrEmpty(entry.Name)) continue; // Directory
                     if (IsInBackup(entry.FullName)) continue;
+                    if (!entry.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) &&
+                        !entry.Name.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase)) continue;
                     
                     string destinationPath = Path.GetFullPath(Path.Combine(runExtractDir, entry.FullName));
-                    if (!destinationPath.StartsWith(runExtractDir, StringComparison.OrdinalIgnoreCase))
+                    if (!destinationPath.StartsWith(extractRoot, StringComparison.OrdinalIgnoreCase))
                         continue;
 
-                    Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
-                    entry.ExtractToFile(destinationPath, true);
+                    destinationPath = GetAvailablePath(destinationPath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                    entry.ExtractToFile(destinationPath);
+                    extractedFiles.Add(destinationPath);
                 }
             }
 
@@ -69,7 +72,8 @@ namespace FattureViewer.Services
                         Directory.CreateDirectory(configuredDestination);
                     }
 
-                    var files = Directory.GetFiles(runExtractDir, searchPattern, SearchOption.AllDirectories)
+                    var files = extractedFiles
+                                         .Where(f => System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(searchPattern, Path.GetFileName(f), true))
                                          .Where(IsAllowedInvoiceFile);
                     foreach (var file in files)
                     {
