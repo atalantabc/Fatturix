@@ -11,7 +11,7 @@ namespace FattureViewerInstaller
             Console.Title = "Installazione di FattureViewer";
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("=============================================");
-            Console.WriteLine("     INSTALLAZIONE DI FATTUREVIEWER v2.0.0   ");
+            Console.WriteLine("     INSTALLAZIONE DI FATTUREVIEWER v3.0.0   ");
             Console.WriteLine("=============================================");
             Console.ResetColor();
             Console.WriteLine();
