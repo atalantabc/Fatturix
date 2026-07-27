@@ -1,0 +1,52 @@
+<Window x:Class="FattureViewer.AdminWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ADMIN" Height="300" Width="400" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" Background="#F5F6F8" FontFamily="Segoe UI" Icon="logo/logo50.png">
+    <Grid Margin="24">
+        <Grid x:Name="LoginPanel">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="Accesso amministratore" FontSize="20" FontWeight="Bold"
+                       HorizontalAlignment="Center" Margin="0,0,0,12"/>
+            <TextBlock Grid.Row="1" Text="Inserisci la password ADMIN."
+                       Foreground="#666" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+            <PasswordBox x:Name="AdminPasswordBox" Grid.Row="2" Padding="8" FontSize="15"
+                         HorizontalContentAlignment="Center" KeyDown="AdminPasswordBox_KeyDown"/>
+            <TextBlock x:Name="LoginErrorText" Grid.Row="3" Text="Password errata."
+                       Foreground="Red" Visibility="Collapsed" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom">
+                <Button Content="Accedi" Width="110" Margin="0,18,10,0" Padding="8"
+                        Background="#0078D7" Foreground="White" BorderThickness="0" Click="LoginButton_Click"/>
+                <Button Content="Annulla" Width="110" Margin="0,18,0,0" Padding="8" Click="CancelButton_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid x:Name="SettingsPanel" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="Impostazioni amministratore" FontSize="20" FontWeight="Bold"
+                       HorizontalAlignment="Center" Margin="0,0,0,18"/>
+            <Border Grid.Row="1" Background="White" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4" Padding="16">
+                <CheckBox x:Name="ZipImportCheckBox" Content="Abilita importazioni ZIP e database"
+                          FontSize="15" VerticalContentAlignment="Center"/>
+            </Border>
+            <TextBlock Grid.Row="2" Text="Se disabilitata, vengono bloccati sia Importa ZIP sia Importa nel database su questo computer."
+                       Foreground="#666" TextWrapping="Wrap" Margin="0,14,0,0"/>
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center">
+                <Button Content="Salva" Width="110" Margin="0,18,10,0" Padding="8"
+                        Background="#0078D7" Foreground="White" BorderThickness="0" Click="SaveButton_Click"/>
+                <Button Content="Annulla" Width="110" Margin="0,18,0,0" Padding="8" Click="CancelButton_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

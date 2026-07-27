@@ -8,6 +8,7 @@ using Microsoft.Win32;
 using FattureViewer.Models;
 using FattureViewer.Services;
 using System.IO;
+using System.IO.Compression;
 using System.Windows;
 
 namespace FattureViewer.ViewModels
@@ -16,7 +17,7 @@ namespace FattureViewer.ViewModels
     {
         private const string SettingsRegistryPath = @"HKEY_CURRENT_USER\Software\FattureViewer";
         private const string PassiveDirectoryValue = "FatturePassiveDirectory";
-        private readonly DatabaseService _dbService;
+        private DatabaseService _dbService;
 
         public MainViewModel()
         {
@@ -24,8 +25,11 @@ namespace FattureViewer.ViewModels
             LoadInvoices();
             
             ImportCommand = new RelayCommand(ExecuteImport);
+            ImportDatabaseCommand = new RelayCommand(ExecuteImportDatabase);
             ClearCommand = new RelayCommand(ExecuteClear);
             SetPathCommand = new RelayCommand(ExecuteSetPath);
+            SetDatabasePathCommand = new RelayCommand(ExecuteSetDatabasePath);
+            AdminCommand = new RelayCommand(ExecuteAdmin);
         }
 
         private ObservableCollection<InvoiceData> _invoices;
@@ -99,8 +103,11 @@ namespace FattureViewer.ViewModels
         }
 
         public ICommand ImportCommand { get; }
+        public ICommand ImportDatabaseCommand { get; }
         public ICommand ClearCommand { get; }
         public ICommand SetPathCommand { get; }
+        public ICommand SetDatabasePathCommand { get; }
+        public ICommand AdminCommand { get; }
 
         private void LoadInvoices()
         {
@@ -202,6 +209,9 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteImport(object obj)
         {
+            if (!EnsureImportsEnabled())
+                return;
+
             string selectedPassiveDir = GetSavedPassiveDirectory();
             if (string.IsNullOrWhiteSpace(selectedPassiveDir))
             {
@@ -227,32 +237,17 @@ namespace FattureViewer.ViewModels
                 if (periodWindow.ShowDialog() != true)
                     return;
                 
-                string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
-                string configContent = EnsureConfigFile(configPath);
-
-                var rules = ConfigParser.Parse(configContent);
-                string internalPassiveDir = ExtractionEngine.GetConfiguredPath(rules, RuleAction.PassiveDir, "Fatture_Passive");
-                Directory.CreateDirectory(internalPassiveDir);
-
                 string importedZipPath = ExtractionEngine.GetAvailablePath(Path.Combine(externalPassiveDir, Path.GetFileName(zipPath)));
                 File.Copy(zipPath, importedZipPath);
 
-                string extractDir = ExtractionEngine.ProcessZip(importedZipPath, configContent, externalPassiveDir, out var extractedFiles);
+                string extractDir = ExtractionEngine.ProcessZip(importedZipPath, string.Empty, externalPassiveDir, out var extractedFiles);
                 var newInvoices = extractedFiles
                                                   .Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
                                                               f.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
-                                                  .Select(f => InvoiceParser.ParseInvoice(f))
-                                                  .Where(i => i.IsValidInvoice)
+                                                  .Select(CreateStoredInvoice)
+                                                  .Where(i => i != null)
+                                                  .Cast<InvoiceData>()
                                                   .ToList();
-
-                if (!rules.Any(r => r.Action == RuleAction.Copy))
-                {
-                    foreach (var invoice in newInvoices)
-                    {
-                        string destName = $"{periodWindow.ImportYear}_{periodWindow.ImportMonth:D2}_{invoice.FileName}";
-                        File.Copy(invoice.OriginalFilePath, ExtractionEngine.GetAvailablePath(Path.Combine(internalPassiveDir, destName)));
-                    }
-                }
 
                 _dbService.SaveInvoices(newInvoices);
                 CopyExtractedFilesToArchive(extractedFiles, extractDir, archiveDir, periodWindow.ImportYear, periodWindow.ImportMonth);
@@ -262,19 +257,162 @@ namespace FattureViewer.ViewModels
             }
         }
 
-        private static string EnsureConfigFile(string configPath)
+        private void ExecuteImportDatabase(object obj)
         {
-            string content = GetDefaultConfig();
-            File.WriteAllText(configPath, content);
-            return content;
+            if (!EnsureImportsEnabled())
+                return;
+
+            var dialog = new OpenFileDialog
+            {
+                Filter = "Fatture e archivi ZIP (*.xml;*.p7m;*.zip)|*.xml;*.p7m;*.zip",
+                Multiselect = true,
+                Title = "Importa nel database interno"
+            };
+
+            if (dialog.ShowDialog() != true)
+                return;
+
+            var invoices = ReadDatabaseImportFiles(dialog.FileNames);
+            _dbService.SaveInvoices(invoices);
+            LoadInvoices();
+
+            MessageBox.Show(
+                $"Importate {invoices.Count} fatture nel database interno. Nessun file è stato copiato nell'archivio ZIP.",
+                "Importazione completata",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
-        private static string GetDefaultConfig()
+        private void ExecuteSetDatabasePath(object obj)
         {
-            return "PASSIVE_DIR \"Fatture_Passive\"\r\n" +
-                   "COPY \"*.xml\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"\r\n" +
-                   "COPY \"*.p7m\" TO \"Fatture_Passive\" RENAME \"{year}_{month}_{filename}\"";
+            string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
+                "Inserisci la cartella del database interno. Sono supportati anche percorsi di rete, ad esempio \\\\SERVER\\Fatture:",
+                "Imposta percorso database",
+                _dbService.StorageDirectory);
+            if (string.IsNullOrWhiteSpace(selectedPath))
+                return;
+
+            try
+            {
+                string newDirectory = AppSettingsService.NormalizeStorageDirectory(selectedPath);
+                if (string.Equals(newDirectory, _dbService.StorageDirectory, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var replacement = new DatabaseService(newDirectory, migrateLegacyDatabase: false);
+                replacement.SaveInvoices(_dbService.GetAllInvoicesWithContent());
+                AppSettingsService.SetStorageDirectory(newDirectory);
+
+                _dbService.Dispose();
+                _dbService = replacement;
+                LoadInvoices();
+
+                MessageBox.Show(
+                    $"Database spostato e percorso salvato:\n\n{newDirectory}",
+                    "Percorso database",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Impossibile usare il percorso indicato. Verifica che la cartella locale o di rete sia raggiungibile e scrivibile.\n\n" + ex.Message,
+                    "Errore percorso database",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
+
+        private void ExecuteAdmin(object obj)
+        {
+            var window = new AdminWindow(AppSettingsService.IsZipImportEnabled())
+            {
+                Owner = Application.Current?.MainWindow
+            };
+
+            if (window.ShowDialog() == true)
+                AppSettingsService.SetZipImportEnabled(window.ZipImportEnabled);
+        }
+
+        private static InvoiceData? CreateStoredInvoice(string filePath)
+        {
+            try
+            {
+                return CreateStoredInvoice(Path.GetFileName(filePath), File.ReadAllBytes(filePath));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static InvoiceData? CreateStoredInvoice(string fileName, byte[] content)
+        {
+            InvoiceData invoice = InvoiceParser.ParseInvoice(fileName, content);
+            if (!invoice.IsValidInvoice)
+                return null;
+
+            invoice.FileContent = content;
+            invoice.OriginalFilePath = string.Empty;
+            return invoice;
+        }
+
+        public static System.Collections.Generic.List<InvoiceData> ReadDatabaseImportFiles(
+            System.Collections.Generic.IEnumerable<string> filePaths)
+        {
+            const long maxInvoiceBytes = 50L * 1024 * 1024;
+            var invoices = new System.Collections.Generic.List<InvoiceData>();
+
+            foreach (string filePath in filePaths)
+            {
+                try
+                {
+                    if (!filePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (new FileInfo(filePath).Length <= maxInvoiceBytes)
+                        {
+                            InvoiceData? invoice = CreateStoredInvoice(filePath);
+                            if (invoice != null) invoices.Add(invoice);
+                        }
+                        continue;
+                    }
+
+                    using ZipArchive archive = ZipFile.OpenRead(filePath);
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(entry.Name) || entry.Length <= 0 || entry.Length > maxInvoiceBytes ||
+                            (!entry.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) &&
+                             !entry.Name.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase)))
+                            continue;
+
+                        using Stream source = entry.Open();
+                        using var content = new MemoryStream((int)entry.Length);
+                        source.CopyTo(content);
+                        InvoiceData? invoice = CreateStoredInvoice(entry.Name, content.ToArray());
+                        if (invoice != null) invoices.Add(invoice);
+                    }
+                }
+                catch
+                {
+                    // Un file non valido non interrompe l'importazione degli altri.
+                }
+            }
+
+            return invoices;
+        }
+
+        private static bool EnsureImportsEnabled()
+        {
+            if (AppSettingsService.IsZipImportEnabled())
+                return true;
+
+            MessageBox.Show(
+                "Le importazioni sono state disattivate su questo computer.",
+                "Importazioni disabilitate",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
+
         private static string GetSavedPassiveDirectory()
         {
             return Registry.GetValue(SettingsRegistryPath, PassiveDirectoryValue, "") as string ?? "";
@@ -342,13 +480,16 @@ namespace FattureViewer.ViewModels
 
         private void LoadInvoiceContent()
         {
-            if (SelectedInvoice != null && File.Exists(SelectedInvoice.OriginalFilePath))
+            if (SelectedInvoice != null)
             {
                 try
                 {
-                    byte[] bytes = File.ReadAllBytes(SelectedInvoice.OriginalFilePath);
+                    byte[]? bytes = _dbService.GetInvoiceContent(SelectedInvoice.Id);
+                    if (bytes == null || bytes.Length == 0)
+                        throw new InvalidOperationException("Il documento non è presente nel database interno.");
+
                     string rawContent = "";
-                    if (SelectedInvoice.OriginalFilePath.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
+                    if (SelectedInvoice.FileName.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
                     {
                         rawContent = InvoiceParser.DecodeP7M(bytes);
                     }
@@ -369,7 +510,7 @@ namespace FattureViewer.ViewModels
             else
             {
                 InvoiceXmlContent = "Nessuna fattura selezionata.";
-                InvoiceHtmlContent = "<html><body><p>Nessuna fattura selezionata o file non trovato.</p></body></html>";
+                InvoiceHtmlContent = "<html><body><p>Nessuna fattura selezionata.</p></body></html>";
             }
         }
 

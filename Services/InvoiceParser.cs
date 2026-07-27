@@ -12,14 +12,31 @@ namespace FattureViewer.Services
     {
         public static InvoiceData ParseInvoice(string filePath)
         {
-            var data = new InvoiceData { FileName = Path.GetFileName(filePath), OriginalFilePath = filePath };
+            try
+            {
+                return ParseInvoice(Path.GetFileName(filePath), File.ReadAllBytes(filePath), filePath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to read {filePath}: {ex.Message}");
+                return new InvoiceData { FileName = Path.GetFileName(filePath), OriginalFilePath = filePath };
+            }
+        }
+
+        public static InvoiceData ParseInvoice(string fileName, byte[] fileBytes)
+        {
+            return ParseInvoice(fileName, fileBytes, string.Empty);
+        }
+
+        private static InvoiceData ParseInvoice(string fileName, byte[] fileBytes, string originalFilePath)
+        {
+            var data = new InvoiceData { FileName = fileName, OriginalFilePath = originalFilePath };
 
             try
             {
-                byte[] fileBytes = File.ReadAllBytes(filePath);
                 string xmlContent;
 
-                if (filePath.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
+                if (fileName.EndsWith(".p7m", StringComparison.OrdinalIgnoreCase))
                 {
                     xmlContent = DecodeP7M(fileBytes);
                 }
@@ -92,7 +109,7 @@ namespace FattureViewer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to parse {filePath}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Failed to parse {fileName}: {ex.Message}");
             }
 
             return data;

@@ -1,17 +1,61 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using FattureViewer.Services;
 using FattureViewer.ViewModels;
+using FattureViewer.Models;
 
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new Exception(message);
 }
 
+string databaseTestDir = Path.Combine(Path.GetTempPath(), "FattureViewerDatabaseTest_" + Guid.NewGuid().ToString("N"));
+try
+{
+    byte[] expectedContent = System.Text.Encoding.UTF8.GetBytes("<FatturaElettronica />");
+    using var database = new DatabaseService(databaseTestDir, migrateLegacyDatabase: false);
+    database.SaveInvoice(new InvoiceData
+    {
+        Id = "database-test",
+        FileName = "test.xml",
+        Date = new DateTime(2026, 7, 13),
+        Year = 2026,
+        Month = 7,
+        Day = 13,
+        SenderName = "Test",
+        FileContent = expectedContent
+    });
+    Assert(database.GetAllInvoices().Single().FileContent.Length == 0, "La lista metadati carica inutilmente il BLOB.");
+    Assert(database.GetInvoiceContent("database-test")!.SequenceEqual(expectedContent), "Il documento non viene letto dal database.");
+
+    byte[] invoiceXml = System.Text.Encoding.UTF8.GetBytes(
+        "<FatturaElettronica><FatturaElettronicaHeader><CedentePrestatore><DatiAnagrafici><Anagrafica><Denominazione>Test ZIP</Denominazione></Anagrafica></DatiAnagrafici></CedentePrestatore></FatturaElettronicaHeader><FatturaElettronicaBody><DatiGenerali><DatiGeneraliDocumento><Data>2026-07-13</Data></DatiGeneraliDocumento></DatiGenerali></FatturaElettronicaBody></FatturaElettronica>");
+    string databaseZip = Path.Combine(databaseTestDir, "fatture.zip");
+    using (ZipArchive zip = ZipFile.Open(databaseZip, ZipArchiveMode.Create))
+    {
+        using Stream output = zip.CreateEntry("cartella/fattura.xml").Open();
+        output.Write(invoiceXml, 0, invoiceXml.Length);
+    }
+    var zipInvoices = MainViewModel.ReadDatabaseImportFiles(new[] { databaseZip });
+    Assert(zipInvoices.Count == 1, "Lo ZIP non importa la fattura nel database.");
+    Assert(zipInvoices[0].FileContent.SequenceEqual(invoiceXml), "Il contenuto estratto dallo ZIP non viene conservato nel BLOB.");
+}
+finally
+{
+    if (Directory.Exists(databaseTestDir))
+        Directory.Delete(databaseTestDir, true);
+}
+
 string? testRoot = Environment.GetEnvironmentVariable("FATTURE_TEST_DIR");
 if (string.IsNullOrWhiteSpace(testRoot) || !Directory.Exists(testRoot))
     testRoot = @"D:\DocumentiD\ProgammaFattureTestFiles";
+if (!Directory.Exists(testRoot))
+{
+    Console.WriteLine("OK (database e ZIP interno); test ZIP archivio saltato: campioni non disponibili");
+    return;
+}
 string sampleZip = Directory.EnumerateFiles(testRoot, "*.zip", SearchOption.AllDirectories)
                             .FirstOrDefault(f => !f.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                                                       .Any(part => part.Equals("Backup", StringComparison.OrdinalIgnoreCase)) &&

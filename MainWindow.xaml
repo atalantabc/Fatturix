@@ -50,6 +50,11 @@
                     <Menu Background="Transparent" Margin="5" VerticalAlignment="Center">
                         <MenuItem Header="⋮" FontSize="18" FontWeight="Bold" Padding="5,0" Foreground="#333" BorderThickness="1" BorderBrush="#CCC" Background="White">
                             <MenuItem Header="Imposta percorso Fatture Passive..." Command="{Binding SetPathCommand}" FontSize="13"/>
+                            <MenuItem Header="Importa nel database..." Command="{Binding ImportDatabaseCommand}" FontSize="13"/>
+                            <MenuItem Header="Imposta percorso database..." Command="{Binding SetDatabasePathCommand}" FontSize="13"/>
+                            <Separator/>
+                            <MenuItem Header="ADMIN..." Command="{Binding AdminCommand}" FontSize="13" FontWeight="SemiBold"/>
+                            <Separator/>
                             <MenuItem Header="Svuota Database" Command="{Binding ClearCommand}" FontSize="13" Foreground="Red"/>
                         </MenuItem>
                     </Menu>

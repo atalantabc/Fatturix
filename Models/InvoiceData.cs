@@ -10,6 +10,10 @@ namespace FattureViewer.Models
         
         public string FileName { get; set; } = string.Empty;
         public string OriginalFilePath { get; set; } = string.Empty;
+
+        // Il documento originale viene conservato nel database, così la
+        // visualizzazione non dipende dalla cartella usata durante l'importazione.
+        public byte[] FileContent { get; set; } = Array.Empty<byte>();
         
         public DateTime Date { get; set; }
         
