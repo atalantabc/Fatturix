@@ -47,6 +47,9 @@
                 <TreeView Grid.Column="0"
                           ItemsSource="{Binding InvoiceTree}"
                           SelectedItemChanged="TreeView_SelectedItemChanged"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          ScrollViewer.CanContentScroll="True"
                           Background="White"
                           BorderBrush="#CCCCCC"
                           BorderThickness="1"
@@ -103,6 +106,9 @@
                 <ListBox Grid.Column="0"
                          ItemsSource="{Binding FlatSearchResults}"
                          SelectedItem="{Binding SelectedInvoice, Mode=TwoWay}"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
+                         ScrollViewer.CanContentScroll="True"
                          Background="White"
                          BorderBrush="#CCCCCC"
                          BorderThickness="1"
@@ -260,7 +266,7 @@
                     <TextBlock Text="{Binding SearchLabel}"
                                VerticalAlignment="Center"
                                Margin="0,0,5,0"/>
-                    <TextBox Text="{Binding SearchCompany, UpdateSourceTrigger=PropertyChanged}"
+                    <TextBox Text="{Binding SearchCompany, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                              Width="160"
                              Margin="0,0,15,0"
                              VerticalContentAlignment="Center"/>
@@ -268,7 +274,7 @@
                     <TextBlock Text="Anno:"
                                VerticalAlignment="Center"
                                Margin="0,0,5,0"/>
-                    <TextBox Text="{Binding FilterYear, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"
+                    <TextBox Text="{Binding FilterYear, UpdateSourceTrigger=PropertyChanged, TargetNullValue='', Delay=200}"
                              Width="60"
                              Margin="0,0,15,0"
                              VerticalContentAlignment="Center"/>
@@ -276,7 +282,7 @@
                     <TextBlock Text="Mese:"
                                VerticalAlignment="Center"
                                Margin="0,0,5,0"/>
-                    <TextBox Text="{Binding FilterMonth, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"
+                    <TextBox Text="{Binding FilterMonth, UpdateSourceTrigger=PropertyChanged, TargetNullValue='', Delay=200}"
                              Width="40"
                              VerticalContentAlignment="Center"/>
                 </StackPanel>
@@ -297,22 +303,25 @@
                        HorizontalAlignment="Center"/>
         </Border>
 
-        <TabControl Grid.Row="2"
-                    SelectedIndex="{Binding SelectedSectionIndex, Mode=TwoWay}"
-                    Background="#F5F6F8"
-                    BorderBrush="#CCCCCC">
-            <TabItem Header="Fornitori"
-                     FontSize="15"
-                     FontWeight="SemiBold">
-                <ContentControl Content="{Binding}"
-                                ContentTemplate="{StaticResource InvoiceWorkspaceTemplate}"/>
-            </TabItem>
-            <TabItem Header="Clienti"
-                     FontSize="15"
-                     FontWeight="SemiBold">
-                <ContentControl Content="{Binding}"
-                                ContentTemplate="{StaticResource InvoiceWorkspaceTemplate}"/>
-            </TabItem>
-        </TabControl>
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <TabControl Grid.Row="0"
+                        SelectedIndex="{Binding SelectedSectionIndex, Mode=TwoWay}"
+                        Background="#F5F6F8"
+                        BorderBrush="#CCCCCC">
+                <TabItem Header="Fornitori"
+                         FontSize="15"
+                         FontWeight="SemiBold"/>
+                <TabItem Header="Clienti"
+                         FontSize="15"
+                         FontWeight="SemiBold"/>
+            </TabControl>
+            <ContentControl Grid.Row="1"
+                            Content="{Binding}"
+                            ContentTemplate="{StaticResource InvoiceWorkspaceTemplate}"/>
+        </Grid>
     </Grid>
 </Window>

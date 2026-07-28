@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -69,6 +71,31 @@ static string CreateInvoiceZip(
     }
     return path;
 }
+
+var cachedInvoices = Enumerable.Range(0, 25000)
+    .Select(index => new InvoiceData
+    {
+        Date = new DateTime(2026, index % 12 + 1, 1),
+        Year = 2026,
+        Month = index % 12 + 1,
+        DisplayPartyName = index % 10 == 0 ? "CLIENTE VELOCE" : "ALTRO"
+    })
+    .OrderByDescending(invoice => invoice.Date)
+    .ToList();
+var searchTimer = Stopwatch.StartNew();
+for (int index = 0; index < 20; index++)
+{
+    List<InvoiceData> matches = MainViewModel.FilterCachedInvoices(
+        cachedInvoices,
+        2026,
+        null,
+        "veloce");
+    Assert(matches.Count == 2500, "La ricerca in cache restituisce risultati errati.");
+}
+searchTimer.Stop();
+Assert(
+    searchTimer.Elapsed < TimeSpan.FromSeconds(2),
+    $"La ricerca in memoria è troppo lenta: {searchTimer.ElapsedMilliseconds} ms.");
 
 string releasesJson =
     "[" +

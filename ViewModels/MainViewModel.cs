@@ -24,6 +24,8 @@ namespace FattureViewer.ViewModels
         private DatabaseService _supplierDatabase;
         private DatabaseService _customerDatabase;
         private readonly SessionDatabaseService _sessionDatabase;
+        private readonly Dictionary<InvoiceSection, List<InvoiceData>> _invoiceCache = new();
+        private readonly Dictionary<InvoiceSection, ObservableCollection<YearNode>> _treeCache = new();
         private bool _disposed;
 
         public MainViewModel()
@@ -44,7 +46,9 @@ namespace FattureViewer.ViewModels
             AdminCommand = new RelayCommand(ExecuteAdmin);
             VersionCommand = new RelayCommand(ExecuteShowVersion);
 
-            LoadInvoices();
+            RefreshInvoiceCache(InvoiceSection.Suppliers);
+            RefreshInvoiceCache(InvoiceSection.Customers);
+            FilterInvoices();
         }
 
         public ObservableCollection<InvoiceData> Invoices { get; private set; } =
@@ -62,6 +66,8 @@ namespace FattureViewer.ViewModels
             get => _isFlatSearch;
             private set
             {
+                if (_isFlatSearch == value)
+                    return;
                 _isFlatSearch = value;
                 OnPropertyChanged();
             }
@@ -222,44 +228,72 @@ namespace FattureViewer.ViewModels
                 ? _customerDatabase
                 : _supplierDatabase;
 
-        private void LoadInvoices()
+        private void LoadInvoices(bool refresh = false)
         {
+            if (refresh || !_invoiceCache.ContainsKey(ActiveSection))
+                RefreshInvoiceCache(ActiveSection);
             FilterInvoices();
+        }
+
+        private void RefreshInvoiceCache(InvoiceSection section)
+        {
+            DatabaseService database = section == InvoiceSection.Customers
+                ? _customerDatabase
+                : _supplierDatabase;
+            List<InvoiceData> invoices = database.GetAllInvoices();
+            foreach (InvoiceData invoice in invoices)
+            {
+                invoice.IsTemporary = false;
+                PrepareForDisplay(invoice, section);
+            }
+
+            List<InvoiceData> temporary = _sessionDatabase.GetInvoices(section);
+            foreach (InvoiceData invoice in temporary)
+                PrepareForDisplay(invoice, section);
+            invoices.AddRange(temporary);
+            _invoiceCache[section] = invoices
+                .OrderByDescending(invoice => invoice.Date)
+                .ToList();
+            _treeCache[section] = CreateTree(_invoiceCache[section]);
         }
 
         private void FilterInvoices()
         {
-            List<InvoiceData> invoices = ActivePermanentDatabase.GetAllInvoices();
-            foreach (InvoiceData invoice in invoices)
+            if (!_invoiceCache.TryGetValue(ActiveSection, out List<InvoiceData>? invoices))
             {
-                invoice.IsTemporary = false;
-                PrepareForDisplay(invoice, ActiveSection);
+                RefreshInvoiceCache(ActiveSection);
+                invoices = _invoiceCache[ActiveSection];
             }
 
-            List<InvoiceData> temporary = _sessionDatabase.GetInvoices(ActiveSection);
-            foreach (InvoiceData invoice in temporary)
-                PrepareForDisplay(invoice, ActiveSection);
-            invoices.AddRange(temporary);
-
-            IEnumerable<InvoiceData> filtered = invoices;
-            if (FilterYear is > 0)
-                filtered = filtered.Where(invoice => invoice.Year == FilterYear.Value);
-            if (FilterMonth is > 0)
-                filtered = filtered.Where(invoice => invoice.Month == FilterMonth.Value);
-            if (!string.IsNullOrWhiteSpace(SearchCompany))
-            {
-                filtered = filtered.Where(invoice =>
-                    invoice.DisplayPartyName.Contains(
-                        SearchCompany,
-                        StringComparison.OrdinalIgnoreCase));
-            }
-
-            List<InvoiceData> result = filtered
-                .OrderByDescending(invoice => invoice.Date)
-                .ToList();
+            List<InvoiceData> result = FilterCachedInvoices(
+                invoices,
+                FilterYear,
+                FilterMonth,
+                SearchCompany);
             Invoices = new ObservableCollection<InvoiceData>(result);
             OnPropertyChanged(nameof(Invoices));
             BuildTree(result);
+        }
+
+        public static List<InvoiceData> FilterCachedInvoices(
+            IEnumerable<InvoiceData> invoices,
+            int? year,
+            int? month,
+            string? companyName)
+        {
+            IEnumerable<InvoiceData> filtered = invoices;
+            if (year is > 0)
+                filtered = filtered.Where(invoice => invoice.Year == year.Value);
+            if (month is > 0)
+                filtered = filtered.Where(invoice => invoice.Month == month.Value);
+            if (!string.IsNullOrWhiteSpace(companyName))
+            {
+                filtered = filtered.Where(invoice =>
+                    invoice.DisplayPartyName.Contains(
+                        companyName,
+                        StringComparison.OrdinalIgnoreCase));
+            }
+            return filtered.ToList();
         }
 
         private static void PrepareForDisplay(
@@ -275,21 +309,37 @@ namespace FattureViewer.ViewModels
 
         private void BuildTree(List<InvoiceData> invoices)
         {
-            var tree = new ObservableCollection<YearNode>();
             IsFlatSearch = ShouldUseFlatSearch(SearchCompany, FilterMonth);
-            FlatSearchResults = new ObservableCollection<InvoiceData>(
-                IsFlatSearch
-                    ? invoices.OrderByDescending(invoice => invoice.Date)
-                    : Enumerable.Empty<InvoiceData>());
+            FlatSearchResults = IsFlatSearch
+                ? Invoices
+                : new ObservableCollection<InvoiceData>();
             OnPropertyChanged(nameof(FlatSearchResults));
 
             if (IsFlatSearch)
             {
-                InvoiceTree = tree;
+                return;
+            }
+
+            bool unfiltered =
+                string.IsNullOrWhiteSpace(SearchCompany) &&
+                !FilterYear.HasValue &&
+                !FilterMonth.HasValue;
+            if (unfiltered &&
+                _treeCache.TryGetValue(ActiveSection, out ObservableCollection<YearNode>? cachedTree))
+            {
+                InvoiceTree = cachedTree;
                 OnPropertyChanged(nameof(InvoiceTree));
                 return;
             }
 
+            InvoiceTree = CreateTree(invoices);
+            OnPropertyChanged(nameof(InvoiceTree));
+        }
+
+        private static ObservableCollection<YearNode> CreateTree(
+            IEnumerable<InvoiceData> invoices)
+        {
+            var tree = new ObservableCollection<YearNode>();
             int currentYear = DateTime.Now.Year;
             int currentMonth = DateTime.Now.Month;
             foreach (IGrouping<int, InvoiceData> yearGroup in invoices
@@ -337,9 +387,7 @@ namespace FattureViewer.ViewModels
                 }
                 tree.Add(yearNode);
             }
-
-            InvoiceTree = tree;
-            OnPropertyChanged(nameof(InvoiceTree));
+            return tree;
         }
 
         public static bool ShouldUseFlatSearch(string? companyName, int? month)
@@ -481,7 +529,7 @@ namespace FattureViewer.ViewModels
                     periodWindow.ImportYear,
                     periodWindow.ImportMonth);
 
-                LoadInvoices();
+                LoadInvoices(refresh: true);
                 ShowImportCompleted(invoices.Count, "Fornitori", temporary: false);
             }
             catch (Exception ex)
@@ -510,7 +558,7 @@ namespace FattureViewer.ViewModels
             else
             {
                 _customerDatabase.SaveInvoices(invoices);
-                LoadInvoices();
+                LoadInvoices(refresh: true);
                 ShowImportCompleted(invoices.Count, "Clienti", temporary: false);
             }
         }
@@ -543,7 +591,7 @@ namespace FattureViewer.ViewModels
             else
             {
                 ActivePermanentDatabase.SaveInvoices(invoices);
-                LoadInvoices();
+                LoadInvoices(refresh: true);
                 ShowImportCompleted(
                     invoices.Count,
                     section == InvoiceSection.Customers
@@ -591,7 +639,7 @@ namespace FattureViewer.ViewModels
             List<InvoiceData> invoices)
         {
             _sessionDatabase.SaveInvoices(section, invoices);
-            LoadInvoices();
+            LoadInvoices(refresh: true);
             ShowImportCompleted(
                 invoices.Count,
                 section == InvoiceSection.Customers ? "Clienti" : "Fornitori",
@@ -680,7 +728,11 @@ namespace FattureViewer.ViewModels
                 _customerDatabase = newCustomerDatabase;
                 newSupplierDatabase = null;
                 newCustomerDatabase = null;
-                LoadInvoices();
+                _invoiceCache.Clear();
+                _treeCache.Clear();
+                RefreshInvoiceCache(InvoiceSection.Suppliers);
+                RefreshInvoiceCache(InvoiceSection.Customers);
+                FilterInvoices();
 
                 MessageBox.Show(
                     "Database Fornitori e Clienti copiati e percorso salvato:\n\n" +
@@ -917,7 +969,7 @@ namespace FattureViewer.ViewModels
 
             ActivePermanentDatabase.ClearAll();
             SelectedInvoice = null;
-            LoadInvoices();
+            LoadInvoices(refresh: true);
         }
 
         private void LoadInvoiceContent()
