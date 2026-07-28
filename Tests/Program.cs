@@ -11,6 +11,29 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception(message);
 }
 
+string releasesJson =
+    "[" +
+    "{\"tag_name\":\"v3.4.0\"," +
+    "\"body\":\"Versione da non distribuire automaticamente.\\n(N.U)   \"," +
+    "\"draft\":false,\"prerelease\":false,\"assets\":[{" +
+    "\"name\":\"FattureViewerInstaller-3.4.0.exe\"," +
+    "\"browser_download_url\":\"https://example.test/3.4.0.exe\"," +
+    "\"digest\":\"sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}]}," +
+    "{\"tag_name\":\"v3.3.0\"," +
+    "\"body\":\"Aggiornamento automatico consentito.\"," +
+    "\"draft\":false,\"prerelease\":false,\"assets\":[{" +
+    "\"name\":\"FattureViewerInstaller-3.3.0.exe\"," +
+    "\"browser_download_url\":\"https://example.test/3.3.0.exe\"," +
+    "\"digest\":\"sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}]}" +
+    "]";
+var selectedUpdate = UpdateService.SelectEligibleRelease(releasesJson, new Version(3, 2, 0));
+Assert(selectedUpdate?.Version == new Version(3, 3, 0, 0), "La release (N.U) non viene ignorata.");
+Assert(
+    UpdateService.SelectEligibleRelease(releasesJson, new Version(3, 3, 0)) == null,
+    "Viene proposto un aggiornamento già installato.");
+Assert(UpdateService.IsNoUpdateDescription("Test\r\n(N.U)  "), "Il marcatore (N.U) finale non viene riconosciuto.");
+Assert(!UpdateService.IsNoUpdateDescription("Test (N.U) altro"), "Il marcatore (N.U) non finale viene applicato per errore.");
+
 string databaseTestDir = Path.Combine(Path.GetTempPath(), "FattureViewerDatabaseTest_" + Guid.NewGuid().ToString("N"));
 try
 {

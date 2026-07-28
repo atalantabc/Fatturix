@@ -1,123 +1,301 @@
-using System;
-using System.IO;
+using System.Diagnostics;
 using System.Reflection;
 
 namespace FattureViewerInstaller
 {
-    class Program
+    internal static class Program
     {
-        static void Main(string[] args)
+        private const string ApplicationFileName = "FattureViewer.exe";
+
+        private static int Main(string[] args)
         {
-            Console.Title = "Installazione di FattureViewer";
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("=============================================");
-            Console.WriteLine("     INSTALLAZIONE DI FATTUREVIEWER v3.1.1   ");
-            Console.WriteLine("=============================================");
-            Console.ResetColor();
-            Console.WriteLine();
-            
+            bool silent = HasArgument(args, "--silent");
+            bool restart = HasArgument(args, "--restart");
+            bool noShortcuts = HasArgument(args, "--no-shortcuts");
+            int? parentProcessId = GetIntegerArgument(args, "--parent-pid");
+            string installDirectory = GetStringArgument(args, "--install-dir") ??
+                                      Path.Combine(
+                                          Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                          "FattureViewer");
+            string applicationPath = Path.Combine(installDirectory, ApplicationFileName);
+            bool isUpdate = File.Exists(applicationPath);
+            bool succeeded = false;
+
+            if (!silent)
+                PrintHeader(isUpdate);
+
             try
             {
-                // Install to AppData/Local/FattureViewer (so it doesn't require admin privileges)
-                string installDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FattureViewer");
-                if (!Directory.Exists(installDir))
+                WaitForApplicationToClose(parentProcessId, silent);
+                Directory.CreateDirectory(installDirectory);
+
+                if (!silent)
                 {
-                    Directory.CreateDirectory(installDir);
+                    Console.WriteLine(isUpdate
+                        ? "Aggiornamento dell'applicazione in corso..."
+                        : "Installazione dell'applicazione in corso...");
+                    Console.WriteLine($"Destinazione: {applicationPath}");
                 }
 
-                string exePath = Path.Combine(installDir, "FattureViewer.exe");
-                Console.WriteLine("Estrazione del file eseguibile in corso...");
-                Console.WriteLine($"Destinazione: {exePath}");
+                InstallApplicationFile(applicationPath, silent);
+                if (!noShortcuts)
+                    EnsureShortcuts(applicationPath, silent);
+                succeeded = true;
 
-                // Extract the embedded raw exe
-                var assembly = Assembly.GetExecutingAssembly();
-                using (Stream? resourceStream = assembly.GetManifestResourceStream("FattureViewerInstaller.FattureViewer.exe"))
+                if (!silent)
                 {
-                    if (resourceStream == null)
-                    {
-                        throw new Exception("File sorgente dell'applicazione non trovato all'interno dell'installer.");
-                    }
-                    
-                    // Display progress bar/spinner
-                    using (FileStream fileStream = new FileStream(exePath, FileMode.Create, FileAccess.Write))
-                    {
-                        byte[] buffer = new byte[81920];
-                        long totalBytes = resourceStream.Length;
-                        long bytesWritten = 0;
-                        int read;
-                        
-                        while ((read = resourceStream.Read(buffer, 0, buffer.Length)) > 0)
-                        {
-                            fileStream.Write(buffer, 0, read);
-                            bytesWritten += read;
-                            
-                            int percent = (int)((bytesWritten * 100) / totalBytes);
-                            Console.Write($"\rProgresso: {percent}% [");
-                            int progressBars = percent / 4;
-                            Console.Write(new string('=', progressBars));
-                            Console.Write(new string(' ', 25 - progressBars));
-                            Console.Write("]");
-                        }
-                    }
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine();
+                    Console.WriteLine("---------------------------------------------");
+                    Console.WriteLine(isUpdate
+                        ? " Aggiornamento completato con successo! "
+                        : " Installazione completata con successo! ");
+                    Console.WriteLine("---------------------------------------------");
+                    Console.ResetColor();
                 }
-                Console.WriteLine();
-                Console.WriteLine();
-
-                Console.WriteLine("Creazione collegamento sul Desktop...");
-                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-                CreateShortcut(exePath, Path.Combine(desktopPath, "FattureViewer.lnk"));
-
-                Console.WriteLine("Creazione collegamento nel menu Start...");
-                string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs");
-                if (Directory.Exists(startMenuPath))
-                {
-                    CreateShortcut(exePath, Path.Combine(startMenuPath, "FattureViewer.lnk"));
-                }
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("---------------------------------------------");
-                Console.WriteLine(" Installazione completata con successo! ");
-                Console.WriteLine(" Ora puoi avviare FattureViewer dal Desktop!  ");
-                Console.WriteLine("---------------------------------------------");
-                Console.ResetColor();
             }
             catch (Exception ex)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine();
-                Console.WriteLine("ERRORE DURANTE L'INSTALLAZIONE:");
-                Console.WriteLine(ex.Message);
-                Console.ResetColor();
+                if (!silent)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine(isUpdate
+                        ? "ERRORE DURANTE L'AGGIORNAMENTO:"
+                        : "ERRORE DURANTE L'INSTALLAZIONE:");
+                    Console.WriteLine(ex.Message);
+                    Console.ResetColor();
+                }
+            }
+            finally
+            {
+                if (restart && File.Exists(applicationPath))
+                    StartApplication(applicationPath);
             }
 
-            Console.WriteLine();
-            Console.WriteLine("Premi un tasto qualsiasi per uscire...");
-            Console.ReadKey();
+            if (!silent)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Premi un tasto qualsiasi per uscire...");
+                Console.ReadKey();
+            }
+
+            return succeeded ? 0 : 1;
         }
 
-        static void CreateShortcut(string targetPath, string shortcutPath)
+        private static void PrintHeader(bool isUpdate)
+        {
+            Version version = Assembly.GetExecutingAssembly().GetName().Version ??
+                              new Version(0, 0, 0);
+            string action = isUpdate ? "AGGIORNAMENTO" : "INSTALLAZIONE";
+            Console.Title = $"{action} DI FATTUREVIEWER";
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=============================================");
+            Console.WriteLine($"       {action} FATTUREVIEWER v{version.ToString(3)}");
+            Console.WriteLine("=============================================");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+
+        private static void WaitForApplicationToClose(int? parentProcessId, bool silent)
+        {
+            if (parentProcessId.HasValue)
+            {
+                try
+                {
+                    using Process parent = Process.GetProcessById(parentProcessId.Value);
+                    parent.WaitForExit();
+                }
+                catch (ArgumentException)
+                {
+                    // Il processo è già terminato.
+                }
+                return;
+            }
+
+            Process[] runningApplications = Process.GetProcessesByName(
+                Path.GetFileNameWithoutExtension(ApplicationFileName));
+            if (runningApplications.Length == 0)
+                return;
+
+            if (!silent)
+                Console.WriteLine("Chiudi FattureViewer per continuare con l'aggiornamento...");
+
+            foreach (Process process in runningApplications)
+            {
+                using (process)
+                    process.WaitForExit();
+            }
+        }
+
+        private static void InstallApplicationFile(string applicationPath, bool silent)
+        {
+            string newPath = applicationPath + ".new";
+            string backupPath = applicationPath + ".old";
+            DeleteIfExists(newPath);
+            DeleteIfExists(backupPath);
+
+            Assembly assembly = Assembly.GetExecutingAssembly();
+            using Stream? resource = assembly.GetManifestResourceStream(
+                "FattureViewerInstaller.FattureViewer.exe");
+            if (resource == null)
+                throw new InvalidOperationException(
+                    "File dell'applicazione non trovato all'interno dell'installer.");
+
+            using (var destination = new FileStream(newPath, FileMode.CreateNew, FileAccess.Write))
+            {
+                byte[] buffer = new byte[81920];
+                long written = 0;
+                int read;
+                int lastPercent = -1;
+
+                while ((read = resource.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    destination.Write(buffer, 0, read);
+                    written += read;
+
+                    if (!silent)
+                    {
+                        int percent = (int)(written * 100 / resource.Length);
+                        if (percent != lastPercent)
+                        {
+                            PrintProgress(percent);
+                            lastPercent = percent;
+                        }
+                    }
+                }
+
+                destination.Flush(true);
+            }
+
+            if (!silent)
+                Console.WriteLine();
+
+            bool hadExistingApplication = File.Exists(applicationPath);
+            try
+            {
+                if (hadExistingApplication)
+                    File.Move(applicationPath, backupPath);
+
+                File.Move(newPath, applicationPath);
+                DeleteIfExists(backupPath);
+            }
+            catch
+            {
+                DeleteIfExists(newPath);
+                if (!File.Exists(applicationPath) && File.Exists(backupPath))
+                    File.Move(backupPath, applicationPath);
+                throw;
+            }
+        }
+
+        private static void PrintProgress(int percent)
+        {
+            Console.Write($"\rProgresso: {percent}% [");
+            int completed = percent / 4;
+            Console.Write(new string('=', completed));
+            Console.Write(new string(' ', 25 - completed));
+            Console.Write("]");
+        }
+
+        private static void EnsureShortcuts(string applicationPath, bool silent)
+        {
+            string desktopShortcut = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                "FattureViewer.lnk");
+            if (!File.Exists(desktopShortcut))
+                CreateShortcut(applicationPath, desktopShortcut, silent);
+
+            string startMenuDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs");
+            if (Directory.Exists(startMenuDirectory))
+            {
+                string startMenuShortcut = Path.Combine(startMenuDirectory, "FattureViewer.lnk");
+                if (!File.Exists(startMenuShortcut))
+                    CreateShortcut(applicationPath, startMenuShortcut, silent);
+            }
+        }
+
+        private static void CreateShortcut(string targetPath, string shortcutPath, bool silent)
         {
             try
             {
                 Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType != null)
-                {
-                    dynamic? shell = Activator.CreateInstance(shellType);
-                    if (shell != null)
-                    {
-                        dynamic shortcut = shell.CreateShortcut(shortcutPath);
-                        shortcut.TargetPath = targetPath;
-                        shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
-                        shortcut.Description = "Visualizzatore di Fatture Elettroniche";
-                        shortcut.IconLocation = targetPath + ",0";
-                        shortcut.Save();
-                    }
-                }
+                if (shellType == null)
+                    return;
+
+                dynamic? shell = Activator.CreateInstance(shellType);
+                if (shell == null)
+                    return;
+
+                dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                shortcut.TargetPath = targetPath;
+                shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
+                shortcut.Description = "Visualizzatore di Fatture Elettroniche";
+                shortcut.IconLocation = targetPath + ",0";
+                shortcut.Save();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Avviso: Impossibile creare il collegamento '{Path.GetFileName(shortcutPath)}': {ex.Message}");
+                if (!silent)
+                {
+                    Console.WriteLine(
+                        $"Avviso: impossibile creare il collegamento " +
+                        $"'{Path.GetFileName(shortcutPath)}': {ex.Message}");
+                }
             }
+        }
+
+        private static void StartApplication(string applicationPath)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = applicationPath,
+                    WorkingDirectory = Path.GetDirectoryName(applicationPath)!,
+                    UseShellExecute = true
+                });
+            }
+            catch
+            {
+                // L'aggiornamento è concluso; l'utente può avviare l'app dal collegamento.
+            }
+        }
+
+        private static bool HasArgument(string[] args, string name)
+        {
+            return args.Any(argument =>
+                argument.Equals(name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static int? GetIntegerArgument(string[] args, string name)
+        {
+            for (int index = 0; index < args.Length - 1; index++)
+            {
+                if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(args[index + 1], out int value))
+                    return value;
+            }
+            return null;
+        }
+
+        private static string? GetStringArgument(string[] args, string name)
+        {
+            for (int index = 0; index < args.Length - 1; index++)
+            {
+                if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(args[index + 1]))
+                    return Path.GetFullPath(args[index + 1]);
+            }
+            return null;
+        }
+
+        private static void DeleteIfExists(string path)
+        {
+            if (File.Exists(path))
+                File.Delete(path);
         }
     }
 }

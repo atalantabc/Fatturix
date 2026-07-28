@@ -1,10 +1,15 @@
+using System;
+using System.Threading.Tasks;
 using System.Windows;
+using FattureViewer.Services;
 using FattureViewer.ViewModels;
 
 namespace FattureViewer
 {
     public partial class MainWindow : Window
     {
+        private bool _updateCheckStarted;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -12,13 +17,39 @@ namespace FattureViewer
             this.Loaded += MainWindow_Loaded;
         }
 
-        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             if (!Services.PasswordService.IsPasswordSet())
             {
                 var pwdWin = new PasswordWindow(PasswordMode.Setup);
                 pwdWin.Owner = this;
                 pwdWin.ShowDialog();
+            }
+
+            if (!_updateCheckStarted)
+            {
+                _updateCheckStarted = true;
+                await CheckForUpdatesAsync();
+            }
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            try
+            {
+                UpdateInfo? update = await UpdateService.CheckForUpdateAsync();
+                if (update == null || !IsVisible)
+                    return;
+
+                var updateWindow = new UpdateWindow(update)
+                {
+                    Owner = this
+                };
+                updateWindow.ShowDialog();
+            }
+            catch
+            {
+                // L'assenza di rete o di GitHub non deve rallentare né interrompere l'avvio.
             }
         }
 

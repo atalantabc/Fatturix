@@ -27,6 +27,22 @@ FattureViewer è un'applicazione desktop moderna in C# (WPF) progettata per impo
 
 Usare apposito installer sulle release.
 
+## Aggiornamenti
+
+Ogni `FattureViewerInstaller-x.y.z.exe` funziona sia come prima installazione sia
+come aggiornamento: se FattureViewer è già presente, sostituisce soltanto
+l'eseguibile e conserva database, storage e impostazioni.
+
+All'avvio l'app controlla in background le release pubblicate su GitHub. Una
+release stabile più recente viene proposta all'utente e, dopo la conferma,
+l'installer viene scaricato, verificato tramite SHA-256 quando GitHub fornisce
+il digest, eseguito e l'app viene riavviata.
+
+Per escludere una release dagli aggiornamenti automatici, terminare la
+descrizione della release con `(N.U)`. Gli spazi e le righe vuote successive
+vengono ignorati. La release resta comunque disponibile per il download
+manuale.
+
 ## ⚙️ Regole di Configurazione (config.txt)
 
 Il programma è in grado di eseguire automatismi quando si importa un file ZIP. È possibile accedere all'editor di configurazione direttamente dall'interfaccia utente cliccando su **Configura Regole**.
@@ -47,4 +63,3 @@ Esempi di comandi supportati:
   - `ExtractionEngine.cs`: Logica di estrazione ZIP e automazione file.
   - `InvoiceParser.cs`: Logica chirurgica di estrazione da XML e P7M.
   - `HtmlGenerator.cs`: Renderizzazione della grafica stile "fattura di cortesia".
-
