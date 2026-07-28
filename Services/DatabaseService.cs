@@ -14,24 +14,39 @@ namespace FattureViewer.Services
         public string StorageDirectory { get; }
         public string DatabasePath { get; }
 
-        public DatabaseService(string? storageDirectory = null, bool migrateLegacyDatabase = true)
+        public DatabaseService(
+            string? storageDirectory = null,
+            bool migrateLegacyDatabase = true,
+            string databaseFileName = "fatture.db",
+            bool hydrateLegacyContent = true)
         {
             StorageDirectory = AppSettingsService.NormalizeStorageDirectory(
                 storageDirectory ?? AppSettingsService.GetStorageDirectory());
             Directory.CreateDirectory(StorageDirectory);
-            DatabasePath = Path.Combine(StorageDirectory, "fatture.db");
+            DatabasePath = Path.Combine(StorageDirectory, Path.GetFileName(databaseFileName));
 
             _db = new SQLiteConnection(DatabasePath);
             _db.CreateTable<InvoiceData>();
 
-            HydrateMissingContentFromLegacyPaths();
+            if (hydrateLegacyContent)
+                HydrateMissingContentFromLegacyPaths();
             if (migrateLegacyDatabase && !_db.Table<InvoiceData>().Any())
                 ImportLegacyDatabase();
         }
 
         public void SaveInvoice(InvoiceData invoice)
         {
-            var existing = _db.Table<InvoiceData>().FirstOrDefault(i => i.Id == invoice.Id || i.FileName == invoice.FileName);
+            InvoiceData? existing = _db.Table<InvoiceData>()
+                .FirstOrDefault(i => i.Id == invoice.Id);
+            if (existing == null)
+            {
+                existing = _db.Table<InvoiceData>()
+                    .Where(i => i.FileName == invoice.FileName)
+                    .ToList()
+                    .FirstOrDefault(i =>
+                        string.IsNullOrWhiteSpace(i.Section) ||
+                        string.Equals(i.Section, invoice.Section, StringComparison.OrdinalIgnoreCase));
+            }
             if (existing != null)
             {
                 invoice.Id = existing.Id;
@@ -61,7 +76,12 @@ namespace FattureViewer.Services
             return GetInvoiceMetadata().OrderByDescending(i => i.Date).ToList();
         }
 
-        public List<InvoiceData> SearchInvoices(int? year = null, int? month = null, int? day = null, string companyName = null)
+        public List<InvoiceData> SearchInvoices(
+            int? year = null,
+            int? month = null,
+            int? day = null,
+            string? companyName = null,
+            bool useRecipientName = false)
         {
             IEnumerable<InvoiceData> result = GetInvoiceMetadata();
 
@@ -74,8 +94,15 @@ namespace FattureViewer.Services
 
             if (!string.IsNullOrWhiteSpace(companyName))
             {
-                string lowerQuery = companyName.ToLower();
-                result = result.Where(i => !string.IsNullOrEmpty(i.SenderName) && i.SenderName.ToLower().Contains(lowerQuery));
+                string lowerQuery = companyName.ToLowerInvariant();
+                result = result.Where(i =>
+                {
+                    string partyName = useRecipientName
+                        ? GetRecipientName(i)
+                        : i.SenderName;
+                    return !string.IsNullOrWhiteSpace(partyName) &&
+                           partyName.ToLowerInvariant().Contains(lowerQuery);
+                });
             }
 
             return result.OrderByDescending(i => i.Date).ToList();
@@ -106,8 +133,16 @@ namespace FattureViewer.Services
         private List<InvoiceData> GetInvoiceMetadata()
         {
             const string sql = @"SELECT Id, FileName, OriginalFilePath, Date, Year, Month, Day,
-CompanyName, SenderName, RecipientCode, TotalAmount FROM InvoiceData";
+CompanyName, SenderName, SenderVatNumber, RecipientName, RecipientVatNumber,
+RecipientCode, TotalAmount, Section FROM InvoiceData";
             return _db.Query<InvoiceData>(sql);
+        }
+
+        private static string GetRecipientName(InvoiceData invoice)
+        {
+            return string.IsNullOrWhiteSpace(invoice.RecipientName)
+                ? invoice.CompanyName
+                : invoice.RecipientName;
         }
 
         private void HydrateMissingContentFromLegacyPaths()

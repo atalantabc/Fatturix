@@ -30,10 +30,26 @@ namespace FattureViewer.Models
         public string CompanyName { get; set; } = string.Empty;
 
         public string SenderName { get; set; } = string.Empty;
+        public string SenderVatNumber { get; set; } = string.Empty;
+        public string RecipientName { get; set; } = string.Empty;
+        public string RecipientVatNumber { get; set; } = string.Empty;
         public string RecipientCode { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
+        public string Section { get; set; } = string.Empty;
 
         [Ignore]
-        public bool IsValidInvoice => Year > 1 && Month > 0 && Day > 0 && !string.IsNullOrWhiteSpace(SenderName);
+        public bool IsTemporary { get; set; }
+
+        [Ignore]
+        public string DisplayPartyName { get; set; } = string.Empty;
+
+        [Ignore]
+        public bool IsValidInvoice =>
+            Year > 1 &&
+            Month > 0 &&
+            Day > 0 &&
+            (!string.IsNullOrWhiteSpace(SenderName) ||
+             !string.IsNullOrWhiteSpace(RecipientName) ||
+             !string.IsNullOrWhiteSpace(CompanyName));
     }
 }

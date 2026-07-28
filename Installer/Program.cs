@@ -13,7 +13,9 @@ namespace FattureViewerInstaller
             bool restart = HasArgument(args, "--restart");
             bool noShortcuts = HasArgument(args, "--no-shortcuts");
             int? parentProcessId = GetIntegerArgument(args, "--parent-pid");
-            string installDirectory = GetStringArgument(args, "--install-dir") ??
+            string? customInstallDirectory =
+                GetStringArgument(args, "--install-dir");
+            string installDirectory = customInstallDirectory ??
                                       Path.Combine(
                                           Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                                           "FattureViewer");
@@ -26,7 +28,11 @@ namespace FattureViewerInstaller
 
             try
             {
-                WaitForApplicationToClose(parentProcessId, silent);
+                WaitForApplicationToClose(
+                    parentProcessId,
+                    silent,
+                    waitForAnyApplicationInstance:
+                        customInstallDirectory == null);
                 Directory.CreateDirectory(installDirectory);
 
                 if (!silent)
@@ -97,7 +103,10 @@ namespace FattureViewerInstaller
             Console.WriteLine();
         }
 
-        private static void WaitForApplicationToClose(int? parentProcessId, bool silent)
+        private static void WaitForApplicationToClose(
+            int? parentProcessId,
+            bool silent,
+            bool waitForAnyApplicationInstance)
         {
             if (parentProcessId.HasValue)
             {
@@ -112,6 +121,9 @@ namespace FattureViewerInstaller
                 }
                 return;
             }
+
+            if (!waitForAnyApplicationInstance)
+                return;
 
             Process[] runningApplications = Process.GetProcessesByName(
                 Path.GetFileNameWithoutExtension(ApplicationFileName));

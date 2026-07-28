@@ -54,7 +54,6 @@ namespace FattureViewer
         }
 
         private void TreeView_SelectedItemChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<object> e)
-
         {
             if (e.NewValue is InvoiceNode invoiceNode)
             {
@@ -63,6 +62,12 @@ namespace FattureViewer
                     vm.SelectedInvoice = invoiceNode.Data;
                 }
             }
+        }
+
+        private void MainWindow_Closed(object? sender, EventArgs e)
+        {
+            if (DataContext is IDisposable disposable)
+                disposable.Dispose();
         }
     }
 }

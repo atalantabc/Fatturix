@@ -1,0 +1,57 @@
+<Window x:Class="FattureViewer.ImportWarningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Controllo tipo fatture"
+        Width="540"
+        Height="270"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="#F5F6F8"
+        FontFamily="Segoe UI"
+        Icon="logo/logo50.png">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Possibile sezione errata"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Foreground="#9A6700"
+                   Margin="0,0,0,14"/>
+
+        <Border Grid.Row="1"
+                Background="White"
+                BorderBrush="#E3C46B"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="14">
+            <TextBlock x:Name="WarningText"
+                       TextWrapping="Wrap"
+                       FontSize="14"
+                       VerticalAlignment="Center"/>
+        </Border>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,18,0,0">
+            <Button Content="Annulla"
+                    Width="110"
+                    Padding="10,6"
+                    Margin="0,0,10,0"
+                    IsCancel="True"
+                    Click="CancelButton_Click"/>
+            <Button Content="Importa comunque"
+                    Width="150"
+                    Padding="10,6"
+                    Background="#0078D7"
+                    Foreground="White"
+                    FontWeight="SemiBold"
+                    IsDefault="True"
+                    Click="ImportAnywayButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -62,16 +62,22 @@ namespace FattureViewer.Services
                         if (!string.IsNullOrEmpty(denom))
                         {
                             data.CompanyName = denom;
+                            data.RecipientName = denom;
                         }
                         else
                         {
                             var nome = Find(receiver, "Nome")?.Value;
                             var cognome = Find(receiver, "Cognome")?.Value;
                             data.CompanyName = $"{nome} {cognome}".Trim();
+                            data.RecipientName = data.CompanyName;
                         }
                     }
 
-                    var sender = Find(Find(header, "CedentePrestatore"), "Anagrafica");
+                    XElement? recipientParty = Find(header, "CessionarioCommittente");
+                    data.RecipientVatNumber = ReadVatNumber(recipientParty);
+
+                    XElement? senderParty = Find(header, "CedentePrestatore");
+                    var sender = Find(senderParty, "Anagrafica");
                     if (sender != null)
                     {
                         var denom = Find(sender, "Denominazione")?.Value;
@@ -80,6 +86,7 @@ namespace FattureViewer.Services
                         else
                             data.SenderName = $"{Find(sender, "Nome")?.Value} {Find(sender, "Cognome")?.Value}".Trim();
                     }
+                    data.SenderVatNumber = ReadVatNumber(senderParty);
                 }
 
                 // Find Date
@@ -177,6 +184,17 @@ namespace FattureViewer.Services
         {
             return parent?.Descendants().FirstOrDefault(e =>
                 e.Name.LocalName.Equals(localName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string ReadVatNumber(XContainer? party)
+        {
+            XElement? vat = Find(party, "IdFiscaleIVA");
+            if (vat == null)
+                return string.Empty;
+
+            string country = Find(vat, "IdPaese")?.Value?.Trim() ?? string.Empty;
+            string code = Find(vat, "IdCodice")?.Value?.Trim() ?? string.Empty;
+            return (country + code).ToUpperInvariant();
         }
 
         private static string DecodeXmlBytes(byte[] bytes)

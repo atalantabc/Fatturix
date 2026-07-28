@@ -8,12 +8,17 @@ namespace FattureViewer
         private const string AdminPassword = "1907";
 
         public bool ZipImportEnabled { get; private set; }
+        public bool SessionNoSaveEnabled { get; private set; }
 
-        public AdminWindow(bool zipImportEnabled)
+        public AdminWindow(
+            bool zipImportEnabled,
+            bool sessionNoSaveEnabled = false)
         {
             InitializeComponent();
             ZipImportEnabled = zipImportEnabled;
+            SessionNoSaveEnabled = sessionNoSaveEnabled;
             ZipImportCheckBox.IsChecked = zipImportEnabled;
+            SessionNoSaveCheckBox.IsChecked = sessionNoSaveEnabled;
             Loaded += (_, _) => AdminPasswordBox.Focus();
         }
 
@@ -45,6 +50,7 @@ namespace FattureViewer
         private void SaveButton_Click(object sender, RoutedEventArgs e)
         {
             ZipImportEnabled = ZipImportCheckBox.IsChecked == true;
+            SessionNoSaveEnabled = SessionNoSaveCheckBox.IsChecked == true;
             DialogResult = true;
             Close();
         }

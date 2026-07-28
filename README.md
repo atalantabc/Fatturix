@@ -43,6 +43,19 @@ descrizione della release con `(N.U)`. Gli spazi e le righe vuote successive
 vengono ignorati. La release resta comunque disponibile per il download
 manuale.
 
+## Fornitori, Clienti e sessione temporanea
+
+- **Fornitori** mantiene il flusso completo con database `fatture.db`,
+  estrazione, cartelle per periodo e archiviazione dello ZIP.
+- **Clienti** usa il database separato `fattureClienti.db` nella stessa cartella
+  principale e non copia, sposta o archivia file.
+- Il controllo O.M.T. usa principalmente la partita IVA `IT04170380374` e
+  richiede conferma da 6 fatture probabilmente importate nella sezione errata.
+- L'opzione Admin **NON SALVATAGGIO IN SESSIONE** usa un database temporaneo:
+  le fatture restano consultabili durante la sessione e vengono eliminate alla
+  chiusura senza modificare database, ZIP o cartelle reali.
+- La versione installata è consultabile dal menu con i tre puntini.
+
 ## ⚙️ Regole di Configurazione (config.txt)
 
 Il programma è in grado di eseguire automatismi quando si importa un file ZIP. È possibile accedere all'editor di configurazione direttamente dall'interfaccia utente cliccando su **Configura Regole**.
