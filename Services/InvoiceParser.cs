@@ -96,6 +96,8 @@ namespace FattureViewer.Services
                     var datiGenerali = Find(body, "DatiGeneraliDocumento");
                     if (datiGenerali != null)
                     {
+                        data.InvoiceNumber =
+                            Find(datiGenerali, "Numero")?.Value?.Trim() ?? "";
                         var dateStr = Find(datiGenerali, "Data")?.Value;
                         if (DateTime.TryParseExact(dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate) ||
                             DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate))

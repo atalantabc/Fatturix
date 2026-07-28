@@ -167,29 +167,9 @@
                         BorderBrush="#CCCCCC"
                         BorderThickness="1"
                         CornerRadius="4">
-                    <TabControl Background="Transparent"
-                                BorderThickness="0"
-                                Margin="5">
-                        <TabItem Header="Anteprima Documento"
-                                 FontSize="14"
-                                 FontWeight="SemiBold">
-                            <WebBrowser local:WebBrowserHelper.Body="{Binding InvoiceHtmlContent}"/>
-                        </TabItem>
-                        <TabItem Header="Sorgente XML"
-                                 FontSize="14"
-                                 FontWeight="SemiBold">
-                            <TextBox Text="{Binding InvoiceXmlContent, Mode=OneWay}"
-                                     IsReadOnly="True"
-                                     Background="#FAFAFA"
-                                     Foreground="#333333"
-                                     BorderThickness="0"
-                                     FontFamily="Consolas"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     AcceptsReturn="True"
-                                     Padding="10"/>
-                        </TabItem>
-                    </TabControl>
+                    <local:InvoiceViewerControl
+                        HtmlContent="{Binding InvoiceHtmlContent}"
+                        XmlContent="{Binding InvoiceXmlContent}"/>
                 </Border>
             </Grid>
         </DataTemplate>

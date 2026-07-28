@@ -134,7 +134,7 @@ namespace FattureViewer.Services
         {
             const string sql = @"SELECT Id, FileName, OriginalFilePath, Date, Year, Month, Day,
 CompanyName, SenderName, SenderVatNumber, RecipientName, RecipientVatNumber,
-RecipientCode, TotalAmount, Section FROM InvoiceData";
+RecipientCode, InvoiceNumber, TotalAmount, Section FROM InvoiceData";
             return _db.Query<InvoiceData>(sql);
         }
 

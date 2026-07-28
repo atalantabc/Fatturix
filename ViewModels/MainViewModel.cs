@@ -484,10 +484,14 @@ namespace FattureViewer.ViewModels
 
             List<InvoiceData> invoices = ReadDatabaseImportFiles(new[] { zipPath });
             PrepareImportedInvoices(invoices, InvoiceSection.Suppliers);
-            if (!ValidateInvoicesAndConfirm(
-                    invoices,
-                    InvoiceSection.Suppliers))
+            ImportReviewResult review = ReviewInvoices(
+                invoices,
+                InvoiceSection.Suppliers);
+            List<InvoiceData>? approvedInvoices =
+                ImportSafetyService.ResolveImport(invoices, review);
+            if (approvedInvoices == null || approvedInvoices.Count == 0)
                 return;
+            invoices = approvedInvoices;
 
             if (IsSessionNoSaveEnabled)
             {
@@ -508,7 +512,10 @@ namespace FattureViewer.ViewModels
                     Path.Combine(
                         externalPassiveDirectory,
                         Path.GetFileName(zipPath)));
-                File.Copy(zipPath, importedZipPath);
+                if (review.Choice == ImportReviewChoice.All)
+                    File.Copy(zipPath, importedZipPath);
+                else
+                    CreateInvoiceZip(importedZipPath, invoices);
 
                 string extractDirectory = ExtractionEngine.ProcessZip(
                     importedZipPath,
@@ -550,8 +557,14 @@ namespace FattureViewer.ViewModels
 
             List<InvoiceData> invoices = ReadDatabaseImportFiles(new[] { zipPath });
             PrepareImportedInvoices(invoices, InvoiceSection.Customers);
-            if (!ValidateInvoicesAndConfirm(invoices, InvoiceSection.Customers))
+            ImportReviewResult review = ReviewInvoices(
+                invoices,
+                InvoiceSection.Customers);
+            List<InvoiceData>? approvedInvoices =
+                ImportSafetyService.ResolveImport(invoices, review);
+            if (approvedInvoices == null || approvedInvoices.Count == 0)
                 return;
+            invoices = approvedInvoices;
 
             if (IsSessionNoSaveEnabled)
                 SaveTemporaryImport(InvoiceSection.Customers, invoices);
@@ -583,8 +596,12 @@ namespace FattureViewer.ViewModels
 
             List<InvoiceData> invoices = ReadDatabaseImportFiles(dialog.FileNames);
             PrepareImportedInvoices(invoices, section);
-            if (!ValidateInvoicesAndConfirm(invoices, section))
+            ImportReviewResult review = ReviewInvoices(invoices, section);
+            List<InvoiceData>? approvedInvoices =
+                ImportSafetyService.ResolveImport(invoices, review);
+            if (approvedInvoices == null || approvedInvoices.Count == 0)
                 return;
+            invoices = approvedInvoices;
 
             if (IsSessionNoSaveEnabled)
                 SaveTemporaryImport(section, invoices);
@@ -601,7 +618,7 @@ namespace FattureViewer.ViewModels
             }
         }
 
-        private bool ValidateInvoicesAndConfirm(
+        private ImportReviewResult ReviewInvoices(
             List<InvoiceData> invoices,
             InvoiceSection section)
         {
@@ -612,26 +629,33 @@ namespace FattureViewer.ViewModels
                     "Nessuna fattura",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
-                return false;
+                return new ImportReviewResult
+                {
+                    Choice = ImportReviewChoice.Cancel
+                };
             }
 
-            bool warningRequired = ImportSafetyService.RequiresWarning(
-                invoices,
-                section);
-            if (!warningRequired)
-                return true;
+            List<InvoiceData> suspicious =
+                ImportSafetyService.GetSuspiciousInvoices(
+                    invoices,
+                    section);
+            if (suspicious.Count == 0)
+            {
+                return new ImportReviewResult
+                {
+                    Choice = ImportReviewChoice.All
+                };
+            }
 
-            string message = section == InvoiceSection.Suppliers
-                ? "Il sistema ha rilevato che queste fatture sembrano essere fatture emesse verso clienti. Sei sicuro di volerle importare nella sezione Fornitori?"
-                : "Il sistema ha rilevato che queste fatture sembrano essere fatture ricevute da fornitori. Sei sicuro di volerle importare nella sezione Clienti?";
-            var warning = new ImportWarningWindow(message)
+            var warning = new ImportWarningWindow(
+                invoices,
+                suspicious,
+                section)
             {
                 Owner = Application.Current?.MainWindow
             };
-            bool importAnyway = warning.ShowDialog() == true;
-            return ImportSafetyService.CanContinueAfterWarning(
-                warningRequired,
-                importAnyway);
+            warning.ShowDialog();
+            return warning.Result;
         }
 
         private void SaveTemporaryImport(
@@ -872,6 +896,39 @@ namespace FattureViewer.ViewModels
             return invoices;
         }
 
+        public static void CreateInvoiceZip(
+            string destinationPath,
+            IEnumerable<InvoiceData> invoices)
+        {
+            var usedNames = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            using ZipArchive archive = ZipFile.Open(
+                destinationPath,
+                ZipArchiveMode.Create);
+            foreach (InvoiceData invoice in invoices)
+            {
+                string originalName = Path.GetFileName(invoice.FileName);
+                if (string.IsNullOrWhiteSpace(originalName))
+                    originalName = "fattura.xml";
+
+                string entryName = originalName;
+                string stem = Path.GetFileNameWithoutExtension(originalName);
+                string extension = Path.GetExtension(originalName);
+                int suffix = 2;
+                while (!usedNames.Add(entryName))
+                    entryName = $"{stem}_{suffix++}{extension}";
+
+                ZipArchiveEntry entry = archive.CreateEntry(
+                    entryName,
+                    CompressionLevel.Optimal);
+                using Stream output = entry.Open();
+                output.Write(
+                    invoice.FileContent,
+                    0,
+                    invoice.FileContent.Length);
+            }
+        }
+
         private static bool EnsureImportsEnabled()
         {
             if (AppSettingsService.IsZipImportEnabled())
@@ -988,20 +1045,11 @@ namespace FattureViewer.ViewModels
                     ? _sessionDatabase.GetInvoiceContent(SelectedInvoice.Id)
                     : ActivePermanentDatabase.GetInvoiceContent(
                         SelectedInvoice.Id);
-                if (bytes == null || bytes.Length == 0)
-                    throw new InvalidOperationException(
-                        "Il documento non è presente nel database.");
-
-                string rawContent = SelectedInvoice.FileName.EndsWith(
-                    ".p7m",
-                    StringComparison.OrdinalIgnoreCase)
-                    ? InvoiceParser.DecodeP7M(bytes)
-                    : System.Text.Encoding.UTF8.GetString(bytes);
-
-                InvoiceXmlContent = rawContent;
-                InvoiceHtmlContent = HtmlGenerator.GenerateInvoiceHtml(
+                InvoiceDocumentContent content = InvoiceDocumentService.Render(
                     SelectedInvoice,
-                    rawContent);
+                    bytes ?? Array.Empty<byte>());
+                InvoiceXmlContent = content.Xml;
+                InvoiceHtmlContent = content.Html;
             }
             catch (Exception ex)
             {

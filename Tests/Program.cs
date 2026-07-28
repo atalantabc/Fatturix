@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using FattureViewer;
 using FattureViewer.Services;
 using FattureViewer.ViewModels;
 using FattureViewer.Models;
@@ -160,20 +161,10 @@ try
         "IT12345678901",
         omtName,
         omtVat);
-    string fiveInvoicesZip = CreateInvoiceZip(
-        v4TestRoot,
-        "solo-cinque.zip",
-        5,
-        omtName,
-        omtVat,
-        "CLIENTE TEST",
-        "IT10987654321");
-
     var supplierInvoices = MainViewModel.ReadDatabaseImportFiles(new[] { supplierZip });
     var customerInvoices = MainViewModel.ReadDatabaseImportFiles(new[] { customerZip });
     var misplacedCustomers = MainViewModel.ReadDatabaseImportFiles(new[] { misplacedCustomerZip });
     var misplacedSuppliers = MainViewModel.ReadDatabaseImportFiles(new[] { misplacedSupplierZip });
-    var onlyFive = MainViewModel.ReadDatabaseImportFiles(new[] { fiveInvoicesZip });
 
     Assert(supplierInvoices.Count == 1, "Lo ZIP Fornitori corretto non viene letto.");
     Assert(customerInvoices.Count == 1, "Lo ZIP Clienti corretto non viene letto.");
@@ -181,22 +172,150 @@ try
     Assert(customerInvoices[0].RecipientName == "CLIENTE TEST", "La sezione Clienti non usa il destinatario.");
     Assert(supplierInvoices[0].SenderVatNumber == "IT12345678901", "Partita IVA cedente non letta.");
     Assert(customerInvoices[0].RecipientVatNumber == "IT10987654321", "Partita IVA destinatario non letta.");
+    Assert(supplierInvoices[0].InvoiceNumber == "1", "Numero fattura non letto.");
 
+    List<InvoiceData> oneSupplierSuspicious =
+        ImportSafetyService.GetSuspiciousInvoices(
+            misplacedSuppliers.Take(1),
+            InvoiceSection.Customers);
     Assert(
-        ImportSafetyService.RequiresWarning(misplacedCustomers, InvoiceSection.Suppliers),
-        "Sei fatture Clienti nei Fornitori non attivano l'avviso.");
+        oneSupplierSuspicious.Count == 1,
+        "Una singola fattura Fornitore nei Clienti non viene rilevata.");
     Assert(
-        ImportSafetyService.RequiresWarning(misplacedSuppliers, InvoiceSection.Customers),
-        "Sei fatture Fornitori nei Clienti non attivano l'avviso.");
+        ImportSafetyService.GetWarningMessage(
+            1,
+            InvoiceSection.Customers) ==
+        "È stata trovata 1 fattura che sembra essere una fattura Fornitore." &&
+        ImportSafetyService.GetWarningMessage(
+            6,
+            InvoiceSection.Suppliers) ==
+        "Sono state trovate 6 fatture che sembrano essere fatture Clienti.",
+        "Il messaggio singolare/plurale non è corretto.");
     Assert(
-        !ImportSafetyService.RequiresWarning(onlyFive, InvoiceSection.Suppliers),
-        "L'avviso scatta con sole cinque fatture.");
+        ImportSafetyService.GetSuspiciousInvoices(
+            misplacedCustomers,
+            InvoiceSection.Suppliers).Count == 6,
+        "Più fatture Clienti nei Fornitori non vengono rilevate.");
     Assert(
-        !ImportSafetyService.CanContinueAfterWarning(true, false),
-        "Annulla non interrompe l'importazione.");
+        ImportSafetyService.GetSuspiciousInvoices(
+            misplacedSuppliers,
+            InvoiceSection.Customers).Count == 6,
+        "Più fatture Fornitori nei Clienti non vengono rilevate.");
     Assert(
-        ImportSafetyService.CanContinueAfterWarning(true, true),
-        "Importa comunque non consente l'importazione.");
+        ImportSafetyService.IsSuspicious(
+            new InvoiceData
+            {
+                RecipientVatNumber = "IT02745400164"
+            },
+            InvoiceSection.Customers),
+        "Clienti: la P.IVA IT02745400164 come destinatario non apre il controllo.");
+    Assert(
+        ImportSafetyService.IsSuspicious(
+            new InvoiceData
+            {
+                SenderVatNumber = "IT02745400164"
+            },
+            InvoiceSection.Suppliers),
+        "Fornitori: la P.IVA IT02745400164 come mittente non apre il controllo.");
+    Assert(
+        !ImportSafetyService.IsSuspicious(
+            new InvoiceData
+            {
+                SenderVatNumber = "IT02745400164",
+                RecipientVatNumber = "IT99999999999"
+            },
+            InvoiceSection.Customers) &&
+        !ImportSafetyService.IsSuspicious(
+            new InvoiceData
+            {
+                SenderVatNumber = "IT99999999999",
+                RecipientVatNumber = "IT02745400164"
+            },
+            InvoiceSection.Suppliers),
+        "Il controllo usa il lato sbagliato della fattura.");
+    Assert(
+        ImportSafetyService.GetSuspiciousInvoices(
+            supplierInvoices,
+            InvoiceSection.Suppliers).Count == 0 &&
+        ImportSafetyService.GetSuspiciousInvoices(
+            customerInvoices,
+            InvoiceSection.Customers).Count == 0,
+        "Fatture nella sezione corretta vengono segnalate.");
+    Assert(
+        ImportSafetyService.IsReferenceParty(
+            "",
+            "O M T di Terzi G.") &&
+        ImportSafetyService.IsReferenceParty(
+            "02745400164",
+            "nome differente"),
+        "Le varianti ragione sociale o P.IVA senza prefisso non vengono riconosciute.");
+    Assert(
+        !ImportSafetyService.IsReferenceParty(
+            "IT99999999999",
+            omtName),
+        "Una P.IVA diversa viene ignorata nonostante sia il riferimento principale.");
+
+    List<InvoiceData> mixedInvoices = misplacedCustomers
+        .Concat(supplierInvoices)
+        .ToList();
+    List<InvoiceData>? importAll = ImportSafetyService.ResolveImport(
+        mixedInvoices,
+        new ImportReviewResult { Choice = ImportReviewChoice.All });
+    Assert(
+        importAll?.Count == mixedInvoices.Count,
+        "Importa tutte non conserva tutte le fatture.");
+
+    string[] selectedIds =
+    {
+        misplacedCustomers[0].Id,
+        misplacedCustomers[2].Id
+    };
+    List<InvoiceData>? importSelected = ImportSafetyService.ResolveImport(
+        mixedInvoices,
+        new ImportReviewResult
+        {
+            Choice = ImportReviewChoice.Selected,
+            SelectedInvoiceIds = selectedIds
+        });
+    Assert(
+        importSelected?.Select(invoice => invoice.Id)
+            .SequenceEqual(selectedIds) == true,
+        "Importa selezionate non rispetta le checkbox.");
+    Assert(
+        ImportSafetyService.ResolveImport(
+            mixedInvoices,
+            new ImportReviewResult
+            {
+                Choice = ImportReviewChoice.Cancel
+            }) == null,
+        "Annulla non interrompe completamente l'importazione.");
+
+    InvoiceDocumentContent preview = InvoiceDocumentService.Render(
+        misplacedCustomers[0],
+        misplacedCustomers[0].FileContent);
+    Assert(
+        preview.Xml.Contains("<Numero>1</Numero>", StringComparison.Ordinal) &&
+        preview.Html.Contains("CLIENTE TEST", StringComparison.Ordinal),
+        "La preview interna non renderizza completamente la fattura.");
+    var reviewItem = new ImportReviewItem(misplacedCustomers[0])
+    {
+        IsSelected = false
+    };
+    InvoiceDocumentService.Render(
+        reviewItem.Invoice,
+        reviewItem.Invoice.FileContent);
+    Assert(
+        !reviewItem.IsSelected,
+        "La selezione viene persa aprendo e chiudendo la preview.");
+
+    string selectedZip = Path.Combine(v4TestRoot, "solo-selezionate.zip");
+    MainViewModel.CreateInvoiceZip(selectedZip, importSelected!);
+    using (ZipArchive selectedArchive = ZipFile.OpenRead(selectedZip))
+    {
+        Assert(
+            selectedArchive.Entries.Count == 2,
+            "Lo ZIP Fornitori filtrato contiene fatture non selezionate.");
+    }
 
     string supplierWorkflowDirectory = Path.Combine(v4TestRoot, "FlussoFornitori");
     string supplierArchiveDirectory = Path.Combine(supplierWorkflowDirectory, "Archivio");

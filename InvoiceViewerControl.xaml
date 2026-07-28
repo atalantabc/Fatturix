@@ -1,0 +1,29 @@
+<UserControl x:Class="FattureViewer.InvoiceViewerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:FattureViewer">
+    <TabControl Background="Transparent"
+                BorderThickness="0"
+                Margin="5">
+        <TabItem Header="Anteprima Documento"
+                 FontSize="14"
+                 FontWeight="SemiBold">
+            <WebBrowser local:WebBrowserHelper.Body="{Binding HtmlContent, RelativeSource={RelativeSource AncestorType={x:Type local:InvoiceViewerControl}}}"/>
+        </TabItem>
+        <TabItem Header="Sorgente XML"
+                 FontSize="14"
+                 FontWeight="SemiBold">
+            <TextBox Text="{Binding XmlContent, RelativeSource={RelativeSource AncestorType={x:Type local:InvoiceViewerControl}}, Mode=OneWay}"
+                     IsReadOnly="True"
+                     Background="#FAFAFA"
+                     Foreground="#333333"
+                     BorderThickness="0"
+                     FontFamily="Consolas"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     AcceptsReturn="True"
+                     Padding="10"/>
+        </TabItem>
+    </TabControl>
+</UserControl>

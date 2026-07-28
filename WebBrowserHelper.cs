@@ -5,8 +5,14 @@ namespace FattureViewer
 {
     public static class WebBrowserHelper
     {
+        private const string EmptyDocument = "<html><body></body></html>";
+
         public static readonly DependencyProperty BodyProperty =
-            DependencyProperty.RegisterAttached("Body", typeof(string), typeof(WebBrowserHelper), new PropertyMetadata(OnBodyChanged));
+            DependencyProperty.RegisterAttached(
+                "Body",
+                typeof(string),
+                typeof(WebBrowserHelper),
+                new PropertyMetadata(EmptyDocument, OnBodyChanged));
 
         public static string GetBody(DependencyObject dependencyObject)
         {
@@ -22,7 +28,8 @@ namespace FattureViewer
         {
             if (d is WebBrowser webBrowser)
             {
-                webBrowser.NavigateToString((string)e.NewValue ?? "<html><body></body></html>");
+                var body = e.NewValue as string;
+                webBrowser.NavigateToString(string.IsNullOrWhiteSpace(body) ? EmptyDocument : body);
             }
         }
     }

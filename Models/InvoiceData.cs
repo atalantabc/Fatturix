@@ -34,6 +34,7 @@ namespace FattureViewer.Models
         public string RecipientName { get; set; } = string.Empty;
         public string RecipientVatNumber { get; set; } = string.Empty;
         public string RecipientCode { get; set; } = string.Empty;
+        public string InvoiceNumber { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
         public string Section { get; set; } = string.Empty;
 
