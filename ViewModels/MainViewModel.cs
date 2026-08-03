@@ -124,10 +124,37 @@ namespace FattureViewer.ViewModels
             set
             {
                 _searchCompany = value ?? string.Empty;
+                if (!IsInvoiceNumberSearchEnabled)
+                    _searchInvoiceNumber = string.Empty;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(SearchInvoiceNumber));
+                OnPropertyChanged(nameof(IsInvoiceNumberSearchEnabled));
+                OnPropertyChanged(nameof(InvoiceNumberSearchToolTip));
+                FilterInvoices();
+            }
+        }
+
+        private string _searchInvoiceNumber = string.Empty;
+        public string SearchInvoiceNumber
+        {
+            get => _searchInvoiceNumber;
+            set
+            {
+                if (!IsInvoiceNumberSearchEnabled)
+                    return;
+                _searchInvoiceNumber = value ?? string.Empty;
                 OnPropertyChanged();
                 FilterInvoices();
             }
         }
+
+        public bool IsInvoiceNumberSearchEnabled =>
+            IsInvoiceNumberSearchAllowed(ActiveSection, SearchCompany);
+
+        public string? InvoiceNumberSearchToolTip =>
+            IsInvoiceNumberSearchEnabled
+                ? null
+                : "Devi prima inserire un fornitore";
 
         private int? _filterYear;
         public int? FilterYear
@@ -165,6 +192,7 @@ namespace FattureViewer.ViewModels
 
                 _selectedSectionIndex = normalized;
                 _searchCompany = string.Empty;
+                _searchInvoiceNumber = string.Empty;
                 _filterYear = null;
                 _filterMonth = null;
                 _selectedInvoice = null;
@@ -172,6 +200,9 @@ namespace FattureViewer.ViewModels
 
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(SearchCompany));
+                OnPropertyChanged(nameof(SearchInvoiceNumber));
+                OnPropertyChanged(nameof(IsInvoiceNumberSearchEnabled));
+                OnPropertyChanged(nameof(InvoiceNumberSearchToolTip));
                 OnPropertyChanged(nameof(FilterYear));
                 OnPropertyChanged(nameof(FilterMonth));
                 OnPropertyChanged(nameof(SelectedInvoice));
@@ -313,7 +344,10 @@ namespace FattureViewer.ViewModels
                 invoices,
                 FilterYear,
                 FilterMonth,
-                SearchCompany);
+                SearchCompany,
+                IsInvoiceNumberSearchEnabled
+                    ? SearchInvoiceNumber
+                    : string.Empty);
             Invoices = new ObservableCollection<InvoiceData>(result);
             OnPropertyChanged(nameof(Invoices));
             BuildTree(result);
@@ -323,7 +357,8 @@ namespace FattureViewer.ViewModels
             IEnumerable<InvoiceData> invoices,
             int? year,
             int? month,
-            string? companyName)
+            string? companyName,
+            string? invoiceNumber = null)
         {
             IEnumerable<InvoiceData> filtered = invoices;
             if (year is > 0)
@@ -335,6 +370,14 @@ namespace FattureViewer.ViewModels
                 filtered = filtered.Where(invoice =>
                     invoice.DisplayPartyName.Contains(
                         companyName,
+                        StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(invoiceNumber))
+            {
+                filtered = filtered.Where(invoice =>
+                    !string.IsNullOrWhiteSpace(invoice.InvoiceNumber) &&
+                    invoice.InvoiceNumber.Contains(
+                        invoiceNumber,
                         StringComparison.OrdinalIgnoreCase));
             }
             return filtered.ToList();
@@ -353,7 +396,10 @@ namespace FattureViewer.ViewModels
 
         private void BuildTree(List<InvoiceData> invoices)
         {
-            IsFlatSearch = ShouldUseFlatSearch(SearchCompany, FilterMonth);
+            IsFlatSearch = ShouldUseFlatSearch(
+                SearchCompany,
+                FilterMonth,
+                SearchInvoiceNumber);
             FlatSearchResults = IsFlatSearch
                 ? Invoices
                 : new ObservableCollection<InvoiceData>();
@@ -366,6 +412,7 @@ namespace FattureViewer.ViewModels
 
             bool unfiltered =
                 string.IsNullOrWhiteSpace(SearchCompany) &&
+                string.IsNullOrWhiteSpace(SearchInvoiceNumber) &&
                 !FilterYear.HasValue &&
                 !FilterMonth.HasValue;
             if (unfiltered &&
@@ -437,9 +484,22 @@ namespace FattureViewer.ViewModels
             return tree;
         }
 
-        public static bool ShouldUseFlatSearch(string? companyName, int? month)
+        public static bool ShouldUseFlatSearch(
+            string? companyName,
+            int? month,
+            string? invoiceNumber = null)
         {
-            return !string.IsNullOrWhiteSpace(companyName) && !month.HasValue;
+            return (!string.IsNullOrWhiteSpace(companyName) ||
+                    !string.IsNullOrWhiteSpace(invoiceNumber)) &&
+                   !month.HasValue;
+        }
+
+        public static bool IsInvoiceNumberSearchAllowed(
+            InvoiceSection section,
+            string? companyName)
+        {
+            return section == InvoiceSection.Customers ||
+                   !string.IsNullOrWhiteSpace(companyName);
         }
 
         private void ExecuteSetPath(object obj)

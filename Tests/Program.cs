@@ -157,6 +157,75 @@ Assert(
     searchTimer.Elapsed < TimeSpan.FromSeconds(2),
     $"La ricerca in memoria è troppo lenta: {searchTimer.ElapsedMilliseconds} ms.");
 
+var invoiceNumberInvoices = new List<InvoiceData>
+{
+    new()
+    {
+        Id = "cliente-100",
+        DisplayPartyName = "CLIENTE ALFA",
+        InvoiceNumber = "100/2026"
+    },
+    new()
+    {
+        Id = "fornitore-100",
+        DisplayPartyName = "FORNITORE BETA",
+        InvoiceNumber = "100"
+    },
+    new()
+    {
+        Id = "cliente-200",
+        DisplayPartyName = "CLIENTE ALFA",
+        InvoiceNumber = "200"
+    }
+};
+Assert(
+    MainViewModel.FilterCachedInvoices(
+            invoiceNumberInvoices,
+            null,
+            null,
+            null,
+            "100")
+        .Select(invoice => invoice.Id)
+        .OrderBy(id => id)
+        .SequenceEqual(new[] { "cliente-100", "fornitore-100" }),
+    "Ricerca numero fattura senza cliente non funziona.");
+Assert(
+    MainViewModel.FilterCachedInvoices(
+            invoiceNumberInvoices,
+            null,
+            null,
+            "CLIENTE ALFA",
+            "100")
+        .Single().Id == "cliente-100",
+    "Ricerca combinata azienda e numero fattura errata.");
+Assert(
+    MainViewModel.IsInvoiceNumberSearchAllowed(
+        InvoiceSection.Customers,
+        null),
+    "Numero fattura Clienti bloccato senza nome cliente.");
+Assert(
+    !MainViewModel.IsInvoiceNumberSearchAllowed(
+        InvoiceSection.Suppliers,
+        null) &&
+    MainViewModel.IsInvoiceNumberSearchAllowed(
+        InvoiceSection.Suppliers,
+        "FORNITORE BETA"),
+    "Blocco numero fattura Fornitori non dipende dal nome fornitore.");
+Assert(
+    MainViewModel.ShouldUseFlatSearch("", null, "100"),
+    "Ricerca per solo numero fattura non usa la lista risultati.");
+
+DateTime julySuggestion = ImportPeriodWindow.GetSuggestedPeriod(
+    new DateTime(2026, 8, 15));
+Assert(
+    julySuggestion.Year == 2026 && julySuggestion.Month == 7,
+    "Agosto non suggerisce luglio per l'archiviazione Fornitori.");
+DateTime decemberSuggestion = ImportPeriodWindow.GetSuggestedPeriod(
+    new DateTime(2026, 1, 15));
+Assert(
+    decemberSuggestion.Year == 2025 && decemberSuggestion.Month == 12,
+    "Gennaio non suggerisce dicembre dell'anno precedente.");
+
 string releasesJson =
     "[" +
     "{\"tag_name\":\"v3.4.0\"," +

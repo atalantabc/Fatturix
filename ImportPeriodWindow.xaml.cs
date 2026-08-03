@@ -11,12 +11,18 @@ namespace FattureViewer
         public ImportPeriodWindow()
         {
             InitializeComponent();
-            ImportYear = DateTime.Now.Year;
-            ImportMonth = DateTime.Now.Month;
+            DateTime suggestedPeriod = GetSuggestedPeriod(DateTime.Now);
+            ImportYear = suggestedPeriod.Year;
+            ImportMonth = suggestedPeriod.Month;
             YearBox.Text = ImportYear.ToString();
             MonthBox.Text = ImportMonth.ToString("D2");
             YearBox.Focus();
             YearBox.SelectAll();
+        }
+
+        public static DateTime GetSuggestedPeriod(DateTime currentDate)
+        {
+            return currentDate.AddMonths(-1);
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
