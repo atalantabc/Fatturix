@@ -374,10 +374,12 @@ namespace FattureViewer.ViewModels
             }
             if (!string.IsNullOrWhiteSpace(invoiceNumber))
             {
+                string normalizedInvoiceNumber = invoiceNumber.Trim();
                 filtered = filtered.Where(invoice =>
                     !string.IsNullOrWhiteSpace(invoice.InvoiceNumber) &&
-                    invoice.InvoiceNumber.Contains(
-                        invoiceNumber,
+                    string.Equals(
+                        invoice.InvoiceNumber.Trim(),
+                        normalizedInvoiceNumber,
                         StringComparison.OrdinalIgnoreCase));
             }
             return filtered.ToList();

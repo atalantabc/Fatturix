@@ -187,8 +187,8 @@ Assert(
             "100")
         .Select(invoice => invoice.Id)
         .OrderBy(id => id)
-        .SequenceEqual(new[] { "cliente-100", "fornitore-100" }),
-    "Ricerca numero fattura senza cliente non funziona.");
+        .SequenceEqual(new[] { "fornitore-100" }),
+    "Ricerca numero fattura senza cliente non usa una corrispondenza esatta.");
 Assert(
     MainViewModel.FilterCachedInvoices(
             invoiceNumberInvoices,
@@ -196,8 +196,26 @@ Assert(
             null,
             "CLIENTE ALFA",
             "100")
-        .Single().Id == "cliente-100",
-    "Ricerca combinata azienda e numero fattura errata.");
+        .Count == 0,
+    "Ricerca combinata azienda e numero fattura accetta corrispondenze parziali.");
+var exactInvoiceNumberInvoices = new List<InvoiceData>
+{
+    new() { Id = "fattura-7", InvoiceNumber = "7" },
+    new() { Id = "fattura-97", InvoiceNumber = "97" },
+    new() { Id = "fattura-107", InvoiceNumber = "107" },
+    new() { Id = "fattura-127", InvoiceNumber = "127" },
+    new() { Id = "fattura-57", InvoiceNumber = "57" }
+};
+Assert(
+    MainViewModel.FilterCachedInvoices(
+            exactInvoiceNumberInvoices,
+            null,
+            null,
+            null,
+            " 7 ")
+        .Select(invoice => invoice.Id)
+        .SequenceEqual(new[] { "fattura-7" }),
+    "La fattura 7 trova anche 97, 107, 127 o 57.");
 Assert(
     MainViewModel.IsInvoiceNumberSearchAllowed(
         InvoiceSection.Customers,
