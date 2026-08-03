@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using FattureViewer.Services;
 using FattureViewer.ViewModels;
 
@@ -69,11 +70,10 @@ namespace FattureViewer
             object sender,
             MouseButtonEventArgs e)
         {
-            if (sender is not TreeView treeView ||
+            if (sender is not TreeView ||
                 e.OriginalSource is not DependencyObject source)
                 return;
-            if (ItemsControl.ContainerFromElement(treeView, source) is
-                TreeViewItem item)
+            if (FindNearestAncestor<TreeViewItem>(source) is TreeViewItem item)
             {
                 item.IsSelected = true;
                 item.Focus();
@@ -88,11 +88,10 @@ namespace FattureViewer
             object sender,
             MouseButtonEventArgs e)
         {
-            if (sender is not ListBox listBox ||
+            if (sender is not ListBox ||
                 e.OriginalSource is not DependencyObject source)
                 return;
-            if (ItemsControl.ContainerFromElement(listBox, source) is
-                ListBoxItem item)
+            if (FindNearestAncestor<ListBoxItem>(source) is ListBoxItem item)
             {
                 item.IsSelected = true;
                 if (DataContext is MainViewModel vm)
@@ -102,6 +101,23 @@ namespace FattureViewer
             {
                 vm.SelectedDeletionTarget = null;
             }
+        }
+
+        public static T? FindNearestAncestor<T>(DependencyObject? current)
+            where T : DependencyObject
+        {
+            while (current != null)
+            {
+                if (current is T match)
+                    return match;
+
+                DependencyObject? visualParent = current is Visual
+                    ? VisualTreeHelper.GetParent(current)
+                    : null;
+                current = visualParent ?? LogicalTreeHelper.GetParent(current);
+            }
+
+            return null;
         }
 
         private void MainWindow_Closed(object? sender, EventArgs e)

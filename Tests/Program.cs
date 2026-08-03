@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading;
+using System.Windows.Controls;
 using FattureViewer;
 using FattureViewer.Services;
 using FattureViewer.ViewModels;
@@ -92,6 +94,43 @@ static InvoiceData TestInvoice(
         FileContent = System.Text.Encoding.UTF8.GetBytes(sender)
     };
 }
+
+Exception? nestedSelectionError = null;
+var nestedSelectionThread = new Thread(() =>
+{
+    try
+    {
+        var yearItem = new TreeViewItem();
+        var monthItem = new TreeViewItem();
+        var invoiceItem = new TreeViewItem();
+        var monthText = new TextBlock { Text = "Agosto" };
+        var invoiceText = new TextBlock { Text = "Fattura" };
+        monthItem.Header = monthText;
+        invoiceItem.Header = invoiceText;
+        monthItem.Items.Add(invoiceItem);
+        yearItem.Items.Add(monthItem);
+
+        Assert(
+            ReferenceEquals(
+                MainWindow.FindNearestAncestor<TreeViewItem>(monthText),
+                monthItem),
+            "Clic destro sul mese risale erroneamente al nodo anno.");
+        Assert(
+            ReferenceEquals(
+                MainWindow.FindNearestAncestor<TreeViewItem>(invoiceText),
+                invoiceItem),
+            "Clic destro sulla fattura risale erroneamente al nodo anno.");
+    }
+    catch (Exception ex)
+    {
+        nestedSelectionError = ex;
+    }
+});
+nestedSelectionThread.SetApartmentState(ApartmentState.STA);
+nestedSelectionThread.Start();
+nestedSelectionThread.Join();
+if (nestedSelectionError != null)
+    throw nestedSelectionError;
 
 var cachedInvoices = Enumerable.Range(0, 25000)
     .Select(index => new InvoiceData
