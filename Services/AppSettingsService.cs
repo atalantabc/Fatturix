@@ -9,6 +9,7 @@ namespace FattureViewer.Services
         private const string RegistryPath = @"HKEY_CURRENT_USER\Software\FattureViewer";
         private const string StorageDirectoryValue = "InternalStorageDirectory";
         private const string ZipImportEnabledValue = "ZipImportEnabled";
+        private const string AdminDeletionEnabledValue = "AdminDeletionEnabled";
 
         public static string GetStorageDirectory()
         {
@@ -37,6 +38,29 @@ namespace FattureViewer.Services
         public static void SetZipImportEnabled(bool enabled)
         {
             Registry.SetValue(RegistryPath, ZipImportEnabledValue, enabled ? 1 : 0, RegistryValueKind.DWord);
+        }
+
+        public static bool IsAdminDeletionEnabled()
+        {
+            object? value = Registry.GetValue(
+                RegistryPath,
+                AdminDeletionEnabledValue,
+                0);
+            return value switch
+            {
+                int number => number != 0,
+                string text when int.TryParse(text, out int number) => number != 0,
+                _ => false
+            };
+        }
+
+        public static void SetAdminDeletionEnabled(bool enabled)
+        {
+            Registry.SetValue(
+                RegistryPath,
+                AdminDeletionEnabledValue,
+                enabled ? 1 : 0,
+                RegistryValueKind.DWord);
         }
 
         public static string NormalizeStorageDirectory(string directory)

@@ -73,6 +73,26 @@ static string CreateInvoiceZip(
     return path;
 }
 
+static InvoiceData TestInvoice(
+    string id,
+    string fileName,
+    string sender,
+    InvoiceSection section)
+{
+    return new InvoiceData
+    {
+        Id = id,
+        FileName = fileName,
+        Date = new DateTime(2026, 8, 3),
+        Year = 2026,
+        Month = 8,
+        Day = 3,
+        SenderName = sender,
+        Section = section.ToStorageValue(),
+        FileContent = System.Text.Encoding.UTF8.GetBytes(sender)
+    };
+}
+
 var cachedInvoices = Enumerable.Range(0, 25000)
     .Select(index => new InvoiceData
     {
@@ -435,6 +455,433 @@ finally
         Directory.Delete(v4TestRoot, true);
 }
 
+string rollbackTestRoot = Path.Combine(
+    Path.GetTempPath(),
+    "FattureViewerRollbackTests_" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(rollbackTestRoot);
+try
+{
+    string databaseDirectory = Path.Combine(rollbackTestRoot, "Database");
+    string passiveRoot = Path.Combine(rollbackTestRoot, "FatturePassiveTest");
+    string archiveRoot = Path.Combine(passiveRoot, "Archivio");
+    string periodDirectory = Path.Combine(archiveRoot, "2025-7");
+    Directory.CreateDirectory(periodDirectory);
+
+    using var rollbackDatabase = new DatabaseService(
+        databaseDirectory,
+        migrateLegacyDatabase: false,
+        databaseFileName: "rollback.db",
+        hydrateLegacyContent: false);
+    rollbackDatabase.SaveInvoice(TestInvoice(
+        "preesistente",
+        "stesso-nome.xml",
+        "VALORE ORIGINALE",
+        InvoiceSection.Customers));
+
+    DatabaseImportChanges customerChanges =
+        rollbackDatabase.SaveInvoicesForRollback(new[]
+        {
+            TestInvoice(
+                "nuovo-cliente",
+                "nuovo-cliente.xml",
+                "NUOVO CLIENTE",
+                InvoiceSection.Customers),
+            TestInvoice(
+                "id-casuale-importazione",
+                "stesso-nome.xml",
+                "VALORE SOVRASCRITTO",
+                InvoiceSection.Customers)
+        });
+    Assert(
+        rollbackDatabase.GetAllInvoices().Count == 2 &&
+        rollbackDatabase.GetAllInvoices().Any(invoice =>
+            invoice.SenderName == "VALORE SOVRASCRITTO"),
+        "Preparazione rollback Clienti errata.");
+
+    var lastImportStore = new LastImportService(databaseDirectory);
+    var customerRecord = new LastImportRecord
+    {
+        Section = InvoiceSection.Customers,
+        DatabaseChanges = customerChanges,
+        ImportedFileNames = new()
+        {
+            "nuovo-cliente.xml",
+            "stesso-nome.xml"
+        }
+    };
+    lastImportStore.Save(customerRecord);
+    LastImportRecord reopenedRecord =
+        new LastImportService(databaseDirectory).Load()
+        ?? throw new Exception("Registro rollback non persistente.");
+    Assert(
+        reopenedRecord.Section == InvoiceSection.Customers &&
+        reopenedRecord.ImportedFileNames.Count == 2,
+        "Registro ultima importazione perso dopo riapertura.");
+    Assert(
+        !System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(
+                Path.Combine(databaseDirectory, "last-import.dat")))
+            .Contains("nuovo-cliente.xml", StringComparison.Ordinal),
+        "Registro ultima importazione non protetto.");
+
+    string unrelatedCustomerFile = Path.Combine(
+        rollbackTestRoot,
+        "cliente-da-non-toccare.txt");
+    File.WriteAllText(unrelatedCustomerFile, "resta");
+    LastImportService.Rollback(
+        reopenedRecord,
+        InvoiceSection.Customers,
+        rollbackDatabase);
+    List<InvoiceData> customerAfterRollback =
+        rollbackDatabase.GetAllInvoicesWithContent();
+    Assert(
+        customerAfterRollback.Count == 1 &&
+        customerAfterRollback[0].Id == "preesistente" &&
+        customerAfterRollback[0].SenderName == "VALORE ORIGINALE" &&
+        System.Text.Encoding.UTF8.GetString(
+            customerAfterRollback[0].FileContent) == "VALORE ORIGINALE",
+        "Rollback Clienti non elimina solo il nuovo record o non ripristina quello sovrascritto.");
+    Assert(
+        File.ReadAllText(unrelatedCustomerFile) == "resta",
+        "Rollback Clienti ha toccato un file estraneo.");
+
+    DatabaseImportChanges firstChanges =
+        rollbackDatabase.SaveInvoicesForRollback(new[]
+        {
+            TestInvoice(
+                "prima-importazione",
+                "prima.xml",
+                "PRIMA",
+                InvoiceSection.Suppliers)
+        });
+    lastImportStore.Save(new LastImportRecord
+    {
+        Section = InvoiceSection.Suppliers,
+        DatabaseChanges = firstChanges,
+        ImportedFileNames = new() { "prima.xml" }
+    });
+    DatabaseImportChanges latestChanges =
+        rollbackDatabase.SaveInvoicesForRollback(new[]
+        {
+            TestInvoice(
+                "ultima-importazione",
+                "ultima.xml",
+                "ULTIMA",
+                InvoiceSection.Suppliers)
+        });
+
+    string passiveTrackedDirectory = Path.Combine(passiveRoot, "sotto-cartella");
+    Directory.CreateDirectory(passiveTrackedDirectory);
+    string passiveTracked = Path.Combine(passiveTrackedDirectory, "ultima.xml");
+    string passiveUntracked = Path.Combine(passiveRoot, "non-toccare.xml");
+    string archiveTracked = Path.Combine(periodDirectory, "ultima.xml");
+    string archiveUntracked = Path.Combine(periodDirectory, "non-toccare.xml");
+    string archivedZip = Path.Combine(archiveRoot, "2025-7.zip");
+    File.WriteAllText(passiveTracked, "elimina");
+    File.WriteAllText(passiveUntracked, "resta");
+    File.WriteAllText(archiveTracked, "elimina");
+    File.WriteAllText(archiveUntracked, "resta");
+    File.WriteAllText(archivedZip, "elimina");
+
+    var supplierRecord = new LastImportRecord
+    {
+        Section = InvoiceSection.Suppliers,
+        DatabaseChanges = latestChanges,
+        ImportedFileNames = new() { "ultima.xml" },
+        Year = 2025,
+        Month = 7,
+        ZipFileName = "fornitori.zip",
+        PassiveRoot = passiveRoot,
+        ArchiveRoot = archiveRoot,
+        ArchivePeriodDirectory = periodDirectory,
+        ArchivedZipPath = archivedZip,
+        PassiveFiles = new() { passiveTracked },
+        ArchiveFiles = new() { archiveTracked }
+    };
+    lastImportStore.Save(supplierRecord);
+    Assert(
+        new LastImportService(databaseDirectory).Load()?.ImportedFileNames
+            .Single() == "ultima.xml",
+        "Nuova importazione non sostituisce la precedente come unico rollback.");
+    LastImportService.Rollback(
+        supplierRecord,
+        InvoiceSection.Suppliers,
+        rollbackDatabase);
+    Assert(
+        rollbackDatabase.GetAllInvoices().Any(invoice =>
+            invoice.Id == "prima-importazione") &&
+        !rollbackDatabase.GetAllInvoices().Any(invoice =>
+            invoice.Id == "ultima-importazione"),
+        "Rollback Fornitori ha toccato la penultima importazione.");
+    Assert(
+        !File.Exists(passiveTracked) &&
+        !Directory.Exists(passiveTrackedDirectory) &&
+        !File.Exists(archiveTracked) &&
+        !File.Exists(archivedZip),
+        "Rollback Fornitori non elimina i file registrati.");
+    Assert(
+        File.ReadAllText(passiveUntracked) == "resta" &&
+        File.ReadAllText(archiveUntracked) == "resta" &&
+        Directory.Exists(periodDirectory),
+        "Rollback Fornitori ha eliminato file o cartelle non appartenenti all'ultima importazione.");
+
+    string emptyPeriodDirectory = Path.Combine(archiveRoot, "2025-8");
+    Directory.CreateDirectory(emptyPeriodDirectory);
+    string onlyArchiveFile = Path.Combine(emptyPeriodDirectory, "solo-ultima.xml");
+    string onlyArchiveZip = Path.Combine(archiveRoot, "2025-8.zip");
+    File.WriteAllText(onlyArchiveFile, "elimina");
+    File.WriteAllText(onlyArchiveZip, "elimina");
+    DatabaseImportChanges emptyPeriodChanges =
+        rollbackDatabase.SaveInvoicesForRollback(new[]
+        {
+            TestInvoice(
+                "periodo-vuoto",
+                "solo-ultima.xml",
+                "PERIODO VUOTO",
+                InvoiceSection.Suppliers)
+        });
+    LastImportService.Rollback(
+        new LastImportRecord
+        {
+            Section = InvoiceSection.Suppliers,
+            DatabaseChanges = emptyPeriodChanges,
+            ImportedFileNames = new() { "solo-ultima.xml" },
+            Year = 2025,
+            Month = 8,
+            PassiveRoot = passiveRoot,
+            ArchiveRoot = archiveRoot,
+            ArchivePeriodDirectory = emptyPeriodDirectory,
+            ArchivedZipPath = onlyArchiveZip,
+            ArchiveFiles = new() { onlyArchiveFile }
+        },
+        InvoiceSection.Suppliers,
+        rollbackDatabase);
+    Assert(
+        !Directory.Exists(emptyPeriodDirectory) &&
+        Directory.Exists(passiveRoot) &&
+        Directory.Exists(archiveRoot),
+        "La cartella periodo vuota non viene rimossa oppure è stata rimossa una radice.");
+
+    DatabaseImportChanges unsafeChanges =
+        rollbackDatabase.SaveInvoicesForRollback(new[]
+        {
+            TestInvoice(
+                "importazione-non-sicura",
+                "non-sicura.xml",
+                "NON SICURA",
+                InvoiceSection.Suppliers)
+        });
+    string safeCandidate = Path.Combine(passiveRoot, "candidato.xml");
+    string outsideCandidate = Path.Combine(rollbackTestRoot, "fuori-radice.xml");
+    File.WriteAllText(safeCandidate, "resta");
+    File.WriteAllText(outsideCandidate, "resta");
+    var unsafeRecord = new LastImportRecord
+    {
+        Section = InvoiceSection.Suppliers,
+        DatabaseChanges = unsafeChanges,
+        ImportedFileNames = new() { "non-sicura.xml" },
+        Year = 2025,
+        Month = 7,
+        PassiveRoot = passiveRoot,
+        ArchiveRoot = archiveRoot,
+        ArchivePeriodDirectory = periodDirectory,
+        PassiveFiles = new() { safeCandidate, outsideCandidate }
+    };
+    bool unsafeRejected = false;
+    try
+    {
+        LastImportService.Rollback(
+            unsafeRecord,
+            InvoiceSection.Suppliers,
+            rollbackDatabase);
+    }
+    catch (InvalidDataException)
+    {
+        unsafeRejected = true;
+    }
+    Assert(unsafeRejected, "Percorso esterno alla radice non rifiutato.");
+    Assert(
+        rollbackDatabase.GetAllInvoices().Any(invoice =>
+            invoice.Id == "importazione-non-sicura") &&
+        File.Exists(safeCandidate) &&
+        File.Exists(outsideCandidate),
+        "Validazione sicurezza avvenuta dopo una cancellazione.");
+
+    bool wrongSectionRejected = false;
+    try
+    {
+        LastImportService.Rollback(
+            unsafeRecord,
+            InvoiceSection.Customers,
+            rollbackDatabase);
+    }
+    catch (InvalidOperationException)
+    {
+        wrongSectionRejected = true;
+    }
+    Assert(
+        wrongSectionRejected &&
+        rollbackDatabase.GetAllInvoices().Any(invoice =>
+            invoice.Id == "importazione-non-sicura"),
+        "Rollback avviato dalla sezione errata.");
+
+    lastImportStore.Save(customerRecord);
+    string protectedRecordPath = Path.Combine(
+        databaseDirectory,
+        "last-import.dat");
+    byte[] corruptedRecord = File.ReadAllBytes(protectedRecordPath);
+    corruptedRecord[corruptedRecord.Length / 2] ^= 0x5A;
+    File.WriteAllBytes(protectedRecordPath, corruptedRecord);
+    bool corruptedRejected = false;
+    try
+    {
+        new LastImportService(databaseDirectory).Load();
+    }
+    catch (InvalidDataException)
+    {
+        corruptedRejected = true;
+    }
+    Assert(corruptedRejected, "Registro rollback alterato non rifiutato.");
+    lastImportStore.Clear();
+    Assert(
+        new LastImportService(databaseDirectory).Load() == null,
+        "Registro ultima importazione non eliminato.");
+}
+finally
+{
+    if (Directory.Exists(rollbackTestRoot))
+        Directory.Delete(rollbackTestRoot, true);
+}
+
+string deletionTestRoot = Path.Combine(
+    Path.GetTempPath(),
+    "FattureViewerAdminDeletionTests_" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(deletionTestRoot);
+try
+{
+    using var deletionDatabase = new DatabaseService(
+        deletionTestRoot,
+        migrateLegacyDatabase: false,
+        databaseFileName: "eliminazione.db",
+        hydrateLegacyContent: false);
+    InvoiceData januaryOne = TestInvoice(
+        "gennaio-1",
+        "gennaio-1.xml",
+        "GENNAIO 1",
+        InvoiceSection.Customers);
+    InvoiceData januaryTwo = TestInvoice(
+        "gennaio-2",
+        "gennaio-2.xml",
+        "GENNAIO 2",
+        InvoiceSection.Customers);
+    InvoiceData february = TestInvoice(
+        "febbraio",
+        "febbraio.xml",
+        "FEBBRAIO",
+        InvoiceSection.Customers);
+    InvoiceData nextYear = TestInvoice(
+        "anno-successivo",
+        "anno-successivo.xml",
+        "ANNO SUCCESSIVO",
+        InvoiceSection.Customers);
+    januaryOne.Date = januaryTwo.Date = new DateTime(2025, 1, 10);
+    januaryOne.Year = januaryTwo.Year = 2025;
+    januaryOne.Month = januaryTwo.Month = 1;
+    february.Date = new DateTime(2025, 2, 10);
+    february.Year = 2025;
+    february.Month = 2;
+    nextYear.Date = new DateTime(2026, 1, 10);
+    deletionDatabase.SaveInvoices(new[]
+    {
+        januaryOne,
+        januaryTwo,
+        february,
+        nextYear
+    });
+
+    var januaryNode = new MonthNode
+    {
+        Name = "Gennaio",
+        Year = 2025,
+        Month = 1
+    };
+    januaryNode.Invoices.Add(new InvoiceNode { Data = januaryOne });
+    januaryNode.Invoices.Add(new InvoiceNode { Data = januaryTwo });
+    januaryNode.Invoices.Add(new InvoiceNode
+    {
+        Data = TestInvoice(
+            "temporanea",
+            "temporanea.xml",
+            "TEMPORANEA",
+            InvoiceSection.Customers)
+    });
+    januaryNode.Invoices.Last().Data.IsTemporary = true;
+    var februaryNode = new MonthNode
+    {
+        Name = "Febbraio",
+        Year = 2025,
+        Month = 2
+    };
+    februaryNode.Invoices.Add(new InvoiceNode { Data = february });
+    var yearNode = new YearNode { Name = "2025", Year = 2025 };
+    yearNode.Months.Add(januaryNode);
+    yearNode.Months.Add(februaryNode);
+
+    Assert(
+        MainViewModel.GetDeletionIds(januaryNode)
+            .OrderBy(id => id)
+            .SequenceEqual(new[] { "gennaio-1", "gennaio-2" }),
+        "Selezione mese include fatture temporanee o fatture di altri mesi.");
+    Assert(
+        MainViewModel.GetDeletionIds(yearNode).Count == 3,
+        "Selezione anno non include esattamente le fatture permanenti dell'anno.");
+    var filteredJanuaryNode = new MonthNode
+    {
+        Name = "Gennaio",
+        Year = 2025,
+        Month = 1
+    };
+    filteredJanuaryNode.Invoices.Add(new InvoiceNode { Data = januaryOne });
+    Assert(
+        MainViewModel.GetDeletionIds(
+                filteredJanuaryNode,
+                deletionDatabase.GetAllInvoices())
+            .OrderBy(id => id)
+            .SequenceEqual(new[] { "gennaio-1", "gennaio-2" }),
+        "Filtro attivo limita erroneamente l'eliminazione dell'intero mese.");
+    Assert(
+        MainViewModel.GetDeletionIds(januaryOne).Single() == "gennaio-1",
+        "Selezione singola fattura errata.");
+
+    string untouchedFile = Path.Combine(deletionTestRoot, "non-toccare.xml");
+    File.WriteAllText(untouchedFile, "resta");
+    int deletedMonth = deletionDatabase.DeleteInvoices(
+        MainViewModel.GetDeletionIds(januaryNode));
+    Assert(
+        deletedMonth == 2 &&
+        deletionDatabase.GetAllInvoices().Select(invoice => invoice.Id)
+            .OrderBy(id => id)
+            .SequenceEqual(new[] { "anno-successivo", "febbraio" }),
+        "Eliminazione mese ha cancellato record estranei.");
+    Assert(
+        File.ReadAllText(untouchedFile) == "resta",
+        "Eliminazione amministratore ha toccato file esterni al database.");
+
+    int deletedSingle = deletionDatabase.DeleteInvoices(new[] { "febbraio" });
+    Assert(
+        deletedSingle == 1 &&
+        deletionDatabase.GetAllInvoices().Single().Id == "anno-successivo",
+        "Eliminazione singola fattura errata.");
+    deletionDatabase.ClearAll();
+    Assert(
+        deletionDatabase.GetAllInvoices().Count == 0,
+        "Eliminazione intera sezione non svuota il database.");
+}
+finally
+{
+    if (Directory.Exists(deletionTestRoot))
+        Directory.Delete(deletionTestRoot, true);
+}
+
 string migrationTestDirectory = Path.Combine(
     Path.GetTempPath(),
     "FattureViewerMigrationTest_" + Guid.NewGuid().ToString("N"));
@@ -526,7 +973,7 @@ if (string.IsNullOrWhiteSpace(testRoot) || !Directory.Exists(testRoot))
     testRoot = @"D:\DocumentiD\ProgammaFattureTestFiles";
 if (!Directory.Exists(testRoot))
 {
-    Console.WriteLine("OK (database e ZIP interno); test ZIP archivio saltato: campioni non disponibili");
+    Console.WriteLine("OK (database, rollback ed eliminazione ADMIN isolati); test ZIP archivio saltato: campioni non disponibili");
     return;
 }
 string sampleZip = Directory.EnumerateFiles(testRoot, "*.zip", SearchOption.AllDirectories)

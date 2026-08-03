@@ -7,6 +7,12 @@ using FattureViewer.Models;
 
 namespace FattureViewer.Services
 {
+    public sealed class DatabaseImportChanges
+    {
+        public List<string> InsertedInvoiceIds { get; set; } = new();
+        public List<InvoiceData> PreviousInvoices { get; set; } = new();
+    }
+
     public class DatabaseService : IDisposable
     {
         private readonly SQLiteConnection _db;
@@ -36,17 +42,7 @@ namespace FattureViewer.Services
 
         public void SaveInvoice(InvoiceData invoice)
         {
-            InvoiceData? existing = _db.Table<InvoiceData>()
-                .FirstOrDefault(i => i.Id == invoice.Id);
-            if (existing == null)
-            {
-                existing = _db.Table<InvoiceData>()
-                    .Where(i => i.FileName == invoice.FileName)
-                    .ToList()
-                    .FirstOrDefault(i =>
-                        string.IsNullOrWhiteSpace(i.Section) ||
-                        string.Equals(i.Section, invoice.Section, StringComparison.OrdinalIgnoreCase));
-            }
+            InvoiceData? existing = FindExistingInvoice(invoice);
             if (existing != null)
             {
                 invoice.Id = existing.Id;
@@ -68,6 +64,53 @@ namespace FattureViewer.Services
                 {
                     SaveInvoice(invoice);
                 }
+            });
+        }
+
+        public DatabaseImportChanges SaveInvoicesForRollback(
+            IEnumerable<InvoiceData> invoices)
+        {
+            var changes = new DatabaseImportChanges();
+            var insertedIds = new HashSet<string>(StringComparer.Ordinal);
+            var previousIds = new HashSet<string>(StringComparer.Ordinal);
+
+            _db.RunInTransaction(() =>
+            {
+                foreach (InvoiceData invoice in invoices)
+                {
+                    InvoiceData? existing = FindExistingInvoice(invoice);
+                    if (existing == null)
+                    {
+                        _db.Insert(invoice);
+                        insertedIds.Add(invoice.Id);
+                        changes.InsertedInvoiceIds.Add(invoice.Id);
+                        continue;
+                    }
+
+                    if (!insertedIds.Contains(existing.Id) &&
+                        previousIds.Add(existing.Id))
+                        changes.PreviousInvoices.Add(existing);
+
+                    invoice.Id = existing.Id;
+                    if (invoice.FileContent == null || invoice.FileContent.Length == 0)
+                        invoice.FileContent = existing.FileContent ?? Array.Empty<byte>();
+                    _db.Update(invoice);
+                }
+            });
+
+            return changes;
+        }
+
+        public void RollbackImport(DatabaseImportChanges changes)
+        {
+            _db.RunInTransaction(() =>
+            {
+                foreach (string id in changes.InsertedInvoiceIds.Distinct())
+                    _db.Delete<InvoiceData>(id);
+                foreach (InvoiceData invoice in changes.PreviousInvoices
+                             .GroupBy(item => item.Id)
+                             .Select(group => group.First()))
+                    _db.InsertOrReplace(invoice);
             });
         }
 
@@ -124,6 +167,21 @@ namespace FattureViewer.Services
             _db.DeleteAll<InvoiceData>();
         }
 
+        public int DeleteInvoices(IEnumerable<string> invoiceIds)
+        {
+            string[] ids = invoiceIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            int deleted = 0;
+            _db.RunInTransaction(() =>
+            {
+                foreach (string id in ids)
+                    deleted += _db.Delete<InvoiceData>(id);
+            });
+            return deleted;
+        }
+
         public void Dispose()
         {
             _db.Close();
@@ -143,6 +201,24 @@ RecipientCode, InvoiceNumber, TotalAmount, Section FROM InvoiceData";
             return string.IsNullOrWhiteSpace(invoice.RecipientName)
                 ? invoice.CompanyName
                 : invoice.RecipientName;
+        }
+
+        private InvoiceData? FindExistingInvoice(InvoiceData invoice)
+        {
+            InvoiceData? existing = _db.Table<InvoiceData>()
+                .FirstOrDefault(item => item.Id == invoice.Id);
+            if (existing != null)
+                return existing;
+
+            return _db.Table<InvoiceData>()
+                .Where(item => item.FileName == invoice.FileName)
+                .ToList()
+                .FirstOrDefault(item =>
+                    string.IsNullOrWhiteSpace(item.Section) ||
+                    string.Equals(
+                        item.Section,
+                        invoice.Section,
+                        StringComparison.OrdinalIgnoreCase));
         }
 
         private void HydrateMissingContentFromLegacyPaths()

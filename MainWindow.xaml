@@ -47,6 +47,7 @@
                 <TreeView Grid.Column="0"
                           ItemsSource="{Binding InvoiceTree}"
                           SelectedItemChanged="TreeView_SelectedItemChanged"
+                          PreviewMouseRightButtonDown="TreeView_PreviewMouseRightButtonDown"
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.CanContentScroll="True"
@@ -54,6 +55,29 @@
                           BorderBrush="#CCCCCC"
                           BorderThickness="1"
                           Margin="0,0,5,0">
+                    <TreeView.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <ContextMenu.Style>
+                                <Style TargetType="ContextMenu">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsAdminDeletionEnabled}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ContextMenu.Style>
+                            <MenuItem Header="{Binding DeleteSelectionMenuText}"
+                                      Command="{Binding DeleteSelectionCommand}"
+                                      IsEnabled="{Binding HasDeletionSelection}"
+                                      Foreground="#B00020"/>
+                            <Separator/>
+                            <MenuItem Header="{Binding DeleteAllSectionMenuText}"
+                                      Command="{Binding DeleteAllSectionCommand}"
+                                      Foreground="#B00020"
+                                      FontWeight="Bold"/>
+                        </ContextMenu>
+                    </TreeView.ContextMenu>
                     <TreeView.Style>
                         <Style TargetType="{x:Type TreeView}">
                             <Setter Property="Visibility" Value="Visible"/>
@@ -106,6 +130,7 @@
                 <ListBox Grid.Column="0"
                          ItemsSource="{Binding FlatSearchResults}"
                          SelectedItem="{Binding SelectedInvoice, Mode=TwoWay}"
+                         PreviewMouseRightButtonDown="InvoiceList_PreviewMouseRightButtonDown"
                          VirtualizingPanel.IsVirtualizing="True"
                          VirtualizingPanel.VirtualizationMode="Recycling"
                          ScrollViewer.CanContentScroll="True"
@@ -114,6 +139,29 @@
                          BorderThickness="1"
                          Margin="0,0,5,0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <ContextMenu.Style>
+                                <Style TargetType="ContextMenu">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsAdminDeletionEnabled}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ContextMenu.Style>
+                            <MenuItem Header="Elimina fattura"
+                                      Command="{Binding DeleteSelectionCommand}"
+                                      IsEnabled="{Binding HasDeletionSelection}"
+                                      Foreground="#B00020"/>
+                            <Separator/>
+                            <MenuItem Header="{Binding DeleteAllSectionMenuText}"
+                                      Command="{Binding DeleteAllSectionCommand}"
+                                      Foreground="#B00020"
+                                      FontWeight="Bold"/>
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.Style>
                         <Style TargetType="{x:Type ListBox}">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -238,6 +286,15 @@
                                       Foreground="Red"/>
                         </MenuItem>
                     </Menu>
+
+                    <Button Content="↶"
+                            Command="{Binding RollbackImportCommand}"
+                            ToolTip="Annulla ultima importazione"
+                            AutomationProperties.Name="Annulla ultima importazione"
+                            FontSize="20"
+                            FontWeight="Bold"
+                            Padding="9,1"
+                            VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2"

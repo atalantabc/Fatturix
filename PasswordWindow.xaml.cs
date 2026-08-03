@@ -6,7 +6,8 @@ namespace FattureViewer
     public enum PasswordMode
     {
         Setup,
-        Verify
+        Verify,
+        Rollback
     }
 
     public partial class PasswordWindow : Window
@@ -24,6 +25,11 @@ namespace FattureViewer
                 DescText.Text = "Inserisci una nuova password per proteggere lo svuotamento del database.";
                 CancelButton.Visibility = Visibility.Collapsed; // Must set a password
                 this.Closing += (s, e) => { if (DialogResult != true) e.Cancel = true; }; // Prevent closing without setting
+            }
+            else if (_mode == PasswordMode.Rollback)
+            {
+                TitleText.Text = "Annulla importazione";
+                DescText.Text = "Inserisci la password usata per proteggere lo svuotamento del database.";
             }
             else
             {

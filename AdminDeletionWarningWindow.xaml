@@ -1,0 +1,70 @@
+<Window x:Class="FattureViewer.AdminDeletionWarningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ATTENZIONE"
+        Height="350"
+        Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FFF0F0"
+        FontFamily="Segoe UI"
+        Icon="logo/logo50.png">
+    <Border Margin="18"
+            Padding="20"
+            Background="White"
+            BorderBrush="#B00020"
+            BorderThickness="3"
+            CornerRadius="6">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="⚠ FUNZIONE AMMINISTRATORE"
+                       Foreground="#B00020"
+                       FontSize="22"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"/>
+            <TextBlock Grid.Row="1"
+                       Margin="0,18,0,12"
+                       Text="Questo sistema deve essere usato soltanto da amministratori consapevoli. Permette la cancellazione definitiva di fatture dal database. Un uso errato può causare perdita di dati."
+                       Foreground="#8B0000"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="2"
+                       Text="Sei sicuro di continuare?"
+                       Foreground="#B00020"
+                       FontSize="18"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center">
+                <Button Content="SÌ, ATTIVA"
+                        Width="135"
+                        Padding="10"
+                        Margin="0,12,12,0"
+                        Background="#B00020"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontWeight="Bold"
+                        Click="EnableButton_Click"/>
+                <Button Content="NO"
+                        Width="110"
+                        Padding="10"
+                        Margin="0,12,0,0"
+                        Background="White"
+                        Foreground="#B00020"
+                        BorderBrush="#B00020"
+                        BorderThickness="2"
+                        FontWeight="Bold"
+                        IsCancel="True"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

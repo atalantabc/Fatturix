@@ -37,11 +37,14 @@ namespace FattureViewer.ViewModels
 
     public class YearNode : TreeItemNode
     {
+        public int Year { get; set; }
         public ObservableCollection<MonthNode> Months { get; set; } = new ObservableCollection<MonthNode>();
     }
 
     public class MonthNode : TreeItemNode
     {
+        public int Year { get; set; }
+        public int Month { get; set; }
         public ObservableCollection<InvoiceNode> Invoices { get; set; } = new ObservableCollection<InvoiceNode>();
     }
 

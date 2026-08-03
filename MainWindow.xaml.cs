@@ -1,6 +1,8 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using FattureViewer.Services;
 using FattureViewer.ViewModels;
 
@@ -55,12 +57,50 @@ namespace FattureViewer
 
         private void TreeView_SelectedItemChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<object> e)
         {
-            if (e.NewValue is InvoiceNode invoiceNode)
+            if (DataContext is MainViewModel vm)
             {
-                if (this.DataContext is MainViewModel vm)
-                {
+                vm.SelectedDeletionTarget = e.NewValue;
+                if (e.NewValue is InvoiceNode invoiceNode)
                     vm.SelectedInvoice = invoiceNode.Data;
-                }
+            }
+        }
+
+        private void TreeView_PreviewMouseRightButtonDown(
+            object sender,
+            MouseButtonEventArgs e)
+        {
+            if (sender is not TreeView treeView ||
+                e.OriginalSource is not DependencyObject source)
+                return;
+            if (ItemsControl.ContainerFromElement(treeView, source) is
+                TreeViewItem item)
+            {
+                item.IsSelected = true;
+                item.Focus();
+            }
+            else if (DataContext is MainViewModel vm)
+            {
+                vm.SelectedDeletionTarget = null;
+            }
+        }
+
+        private void InvoiceList_PreviewMouseRightButtonDown(
+            object sender,
+            MouseButtonEventArgs e)
+        {
+            if (sender is not ListBox listBox ||
+                e.OriginalSource is not DependencyObject source)
+                return;
+            if (ItemsControl.ContainerFromElement(listBox, source) is
+                ListBoxItem item)
+            {
+                item.IsSelected = true;
+                if (DataContext is MainViewModel vm)
+                    vm.SelectedDeletionTarget = item.DataContext;
+            }
+            else if (DataContext is MainViewModel vm)
+            {
+                vm.SelectedDeletionTarget = null;
             }
         }
 

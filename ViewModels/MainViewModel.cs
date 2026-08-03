@@ -23,10 +23,12 @@ namespace FattureViewer.ViewModels
 
         private DatabaseService _supplierDatabase;
         private DatabaseService _customerDatabase;
+        private LastImportService _lastImportService;
         private readonly SessionDatabaseService _sessionDatabase;
         private readonly Dictionary<InvoiceSection, List<InvoiceData>> _invoiceCache = new();
         private readonly Dictionary<InvoiceSection, ObservableCollection<YearNode>> _treeCache = new();
         private bool _disposed;
+        private object? _selectedDeletionTarget;
 
         public MainViewModel()
         {
@@ -36,6 +38,8 @@ namespace FattureViewer.ViewModels
                 migrateLegacyDatabase: false,
                 databaseFileName: CustomerDatabaseFileName,
                 hydrateLegacyContent: false);
+            _lastImportService = new LastImportService(
+                _supplierDatabase.StorageDirectory);
             _sessionDatabase = new SessionDatabaseService();
 
             ImportCommand = new RelayCommand(ExecuteImport);
@@ -45,6 +49,11 @@ namespace FattureViewer.ViewModels
             SetDatabasePathCommand = new RelayCommand(ExecuteSetDatabasePath);
             AdminCommand = new RelayCommand(ExecuteAdmin);
             VersionCommand = new RelayCommand(ExecuteShowVersion);
+            RollbackImportCommand = new RelayCommand(ExecuteRollbackImport);
+            DeleteSelectionCommand = new RelayCommand(ExecuteDeleteSelection);
+            DeleteAllSectionCommand = new RelayCommand(ExecuteDeleteAllSection);
+            IsAdminDeletionEnabled =
+                AppSettingsService.IsAdminDeletionEnabled();
 
             RefreshInvoiceCache(InvoiceSection.Suppliers);
             RefreshInvoiceCache(InvoiceSection.Customers);
@@ -159,6 +168,7 @@ namespace FattureViewer.ViewModels
                 _filterYear = null;
                 _filterMonth = null;
                 _selectedInvoice = null;
+                SelectedDeletionTarget = null;
 
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(SearchCompany));
@@ -169,6 +179,7 @@ namespace FattureViewer.ViewModels
                 OnPropertyChanged(nameof(ImportDatabaseMenuText));
                 OnPropertyChanged(nameof(ClearDatabaseMenuText));
                 OnPropertyChanged(nameof(SearchLabel));
+                OnPropertyChanged(nameof(DeleteAllSectionMenuText));
                 LoadInvoiceContent();
                 LoadInvoices();
             }
@@ -217,6 +228,39 @@ namespace FattureViewer.ViewModels
         public ICommand SetDatabasePathCommand { get; }
         public ICommand AdminCommand { get; }
         public ICommand VersionCommand { get; }
+        public ICommand RollbackImportCommand { get; }
+        public ICommand DeleteSelectionCommand { get; }
+        public ICommand DeleteAllSectionCommand { get; }
+
+        public bool IsAdminDeletionEnabled { get; private set; }
+
+        public object? SelectedDeletionTarget
+        {
+            get => _selectedDeletionTarget;
+            set
+            {
+                _selectedDeletionTarget = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(DeleteSelectionMenuText));
+                OnPropertyChanged(nameof(HasDeletionSelection));
+            }
+        }
+
+        public bool HasDeletionSelection =>
+            GetDeletionIds(SelectedDeletionTarget).Count > 0;
+
+        public string DeleteSelectionMenuText =>
+            SelectedDeletionTarget switch
+            {
+                YearNode year => $"Elimina anno {year.Name}",
+                MonthNode month => $"Elimina mese {month.Name}",
+                InvoiceNode => "Elimina fattura",
+                InvoiceData => "Elimina fattura",
+                _ => "Elimina selezione"
+            };
+
+        public string DeleteAllSectionMenuText =>
+            $"Elimina tutte le fatture {ActiveSection.ToStorageValue()}";
 
         private InvoiceSection ActiveSection =>
             SelectedSectionIndex == 1
@@ -349,6 +393,7 @@ namespace FattureViewer.ViewModels
                 var yearNode = new YearNode
                 {
                     Name = yearGroup.Key.ToString(),
+                    Year = yearGroup.Key,
                     IsExpanded = yearGroup.Key == currentYear
                 };
 
@@ -365,6 +410,8 @@ namespace FattureViewer.ViewModels
                     var monthNode = new MonthNode
                     {
                         Name = monthName,
+                        Year = yearGroup.Key,
+                        Month = monthGroup.Key,
                         IsExpanded =
                             yearGroup.Key == currentYear &&
                             monthGroup.Key == currentMonth
@@ -506,6 +553,13 @@ namespace FattureViewer.ViewModels
             if (periodWindow.ShowDialog() != true)
                 return;
 
+            List<string> extractedFiles = new();
+            List<string> archiveFiles = new();
+            DatabaseImportChanges? databaseChanges = null;
+            string archivedZipPath = string.Empty;
+            string archivePeriodDirectory = Path.Combine(
+                archiveDirectory,
+                $"{periodWindow.ImportYear}-{periodWindow.ImportMonth}");
             try
             {
                 string importedZipPath = ExtractionEngine.GetAvailablePath(
@@ -521,32 +575,79 @@ namespace FattureViewer.ViewModels
                     importedZipPath,
                     string.Empty,
                     externalPassiveDirectory,
-                    out List<string> extractedFiles);
+                    out extractedFiles);
 
-                _supplierDatabase.SaveInvoices(invoices);
+                databaseChanges =
+                    _supplierDatabase.SaveInvoicesForRollback(invoices);
                 CopyExtractedFilesToArchive(
                     extractedFiles,
                     extractDirectory,
                     archiveDirectory,
                     periodWindow.ImportYear,
-                    periodWindow.ImportMonth);
-                ArchiveZip(
+                    periodWindow.ImportMonth,
+                    archiveFiles);
+                archivedZipPath = ArchiveZip(
                     importedZipPath,
                     archiveDirectory,
                     periodWindow.ImportYear,
                     periodWindow.ImportMonth);
 
-                LoadInvoices(refresh: true);
-                ShowImportCompleted(invoices.Count, "Fornitori", temporary: false);
+                _lastImportService.Save(new LastImportRecord
+                {
+                    Section = InvoiceSection.Suppliers,
+                    DatabaseChanges = databaseChanges,
+                    ImportedFileNames = invoices
+                        .Select(invoice => invoice.FileName)
+                        .ToList(),
+                    Year = periodWindow.ImportYear,
+                    Month = periodWindow.ImportMonth,
+                    ZipFileName = Path.GetFileName(zipPath),
+                    PassiveRoot = externalPassiveDirectory,
+                    ArchiveRoot = archiveDirectory,
+                    ArchivePeriodDirectory = archivePeriodDirectory,
+                    ArchivedZipPath = archivedZipPath,
+                    PassiveFiles = extractedFiles,
+                    ArchiveFiles = archiveFiles
+                });
             }
             catch (Exception ex)
             {
+                if (databaseChanges != null)
+                {
+                    try
+                    {
+                        LastImportService.Rollback(
+                            new LastImportRecord
+                            {
+                                Section = InvoiceSection.Suppliers,
+                                DatabaseChanges = databaseChanges,
+                                Year = periodWindow.ImportYear,
+                                Month = periodWindow.ImportMonth,
+                                PassiveRoot = externalPassiveDirectory,
+                                ArchiveRoot = archiveDirectory,
+                                ArchivePeriodDirectory = archivePeriodDirectory,
+                                ArchivedZipPath = archivedZipPath,
+                                PassiveFiles = extractedFiles,
+                                ArchiveFiles = archiveFiles
+                            },
+                            InvoiceSection.Suppliers,
+                            _supplierDatabase);
+                    }
+                    catch
+                    {
+                        // Registro non sostituito: nessuna vecchia importazione viene persa.
+                    }
+                }
                 MessageBox.Show(
                     "Errore durante l'importazione Fornitori:\n\n" + ex.Message,
                     "Errore importazione",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
+                return;
             }
+
+            LoadInvoices(refresh: true);
+            ShowImportCompleted(invoices.Count, "Fornitori", temporary: false);
         }
 
         private void ImportCustomerZip()
@@ -570,9 +671,10 @@ namespace FattureViewer.ViewModels
                 SaveTemporaryImport(InvoiceSection.Customers, invoices);
             else
             {
-                _customerDatabase.SaveInvoices(invoices);
-                LoadInvoices(refresh: true);
-                ShowImportCompleted(invoices.Count, "Clienti", temporary: false);
+                SavePermanentDatabaseImport(
+                    InvoiceSection.Customers,
+                    invoices,
+                    "Clienti");
             }
         }
 
@@ -607,15 +709,50 @@ namespace FattureViewer.ViewModels
                 SaveTemporaryImport(section, invoices);
             else
             {
-                ActivePermanentDatabase.SaveInvoices(invoices);
-                LoadInvoices(refresh: true);
-                ShowImportCompleted(
-                    invoices.Count,
+                SavePermanentDatabaseImport(
+                    section,
+                    invoices,
                     section == InvoiceSection.Customers
                         ? "Clienti"
-                        : "Fornitori",
-                    temporary: false);
+                        : "Fornitori");
             }
+        }
+
+        private void SavePermanentDatabaseImport(
+            InvoiceSection section,
+            List<InvoiceData> invoices,
+            string sectionName)
+        {
+            DatabaseService database = section == InvoiceSection.Customers
+                ? _customerDatabase
+                : _supplierDatabase;
+            DatabaseImportChanges changes =
+                database.SaveInvoicesForRollback(invoices);
+            try
+            {
+                _lastImportService.Save(new LastImportRecord
+                {
+                    Section = section,
+                    DatabaseChanges = changes,
+                    ImportedFileNames = invoices
+                        .Select(invoice => invoice.FileName)
+                        .ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                database.RollbackImport(changes);
+                MessageBox.Show(
+                    "Importazione annullata: impossibile salvare il registro di ripristino.\n\n" +
+                    ex.Message,
+                    "Errore importazione",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
+            LoadInvoices(refresh: true);
+            ShowImportCompleted(invoices.Count, sectionName, temporary: false);
         }
 
         private ImportReviewResult ReviewInvoices(
@@ -723,6 +860,8 @@ namespace FattureViewer.ViewModels
             DatabaseService? newCustomerDatabase = null;
             try
             {
+                LastImportRecord? lastImport = _lastImportService.Load();
+                LastImportService oldLastImportService = _lastImportService;
                 string newDirectory =
                     AppSettingsService.NormalizeStorageDirectory(selectedPath);
                 if (string.Equals(
@@ -745,13 +884,19 @@ namespace FattureViewer.ViewModels
                 newCustomerDatabase.SaveInvoices(
                     _customerDatabase.GetAllInvoicesWithContent());
 
+                var newLastImportService = new LastImportService(newDirectory);
+                if (lastImport != null)
+                    newLastImportService.Save(lastImport);
+
                 AppSettingsService.SetStorageDirectory(newDirectory);
                 _supplierDatabase.Dispose();
                 _customerDatabase.Dispose();
                 _supplierDatabase = newSupplierDatabase;
                 _customerDatabase = newCustomerDatabase;
+                _lastImportService = newLastImportService;
                 newSupplierDatabase = null;
                 newCustomerDatabase = null;
+                oldLastImportService.Clear();
                 _invoiceCache.Clear();
                 _treeCache.Clear();
                 RefreshInvoiceCache(InvoiceSection.Suppliers);
@@ -785,7 +930,8 @@ namespace FattureViewer.ViewModels
         {
             var window = new AdminWindow(
                 AppSettingsService.IsZipImportEnabled(),
-                IsSessionNoSaveEnabled)
+                IsSessionNoSaveEnabled,
+                IsAdminDeletionEnabled)
             {
                 Owner = Application.Current?.MainWindow
             };
@@ -794,6 +940,10 @@ namespace FattureViewer.ViewModels
             {
                 AppSettingsService.SetZipImportEnabled(window.ZipImportEnabled);
                 IsSessionNoSaveEnabled = window.SessionNoSaveEnabled;
+                AppSettingsService.SetAdminDeletionEnabled(
+                    window.AdminDeletionEnabled);
+                IsAdminDeletionEnabled = window.AdminDeletionEnabled;
+                OnPropertyChanged(nameof(IsAdminDeletionEnabled));
             }
         }
 
@@ -983,7 +1133,8 @@ namespace FattureViewer.ViewModels
             string extractDirectory,
             string archiveDirectory,
             int year,
-            int month)
+            int month,
+            ICollection<string>? copiedFiles = null)
         {
             string targetDirectory = Path.Combine(
                 archiveDirectory,
@@ -999,11 +1150,13 @@ namespace FattureViewer.ViewModels
                     targetDirectory,
                     relativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-                File.Copy(file, ExtractionEngine.GetAvailablePath(targetPath));
+                string copiedPath = ExtractionEngine.GetAvailablePath(targetPath);
+                File.Copy(file, copiedPath);
+                copiedFiles?.Add(copiedPath);
             }
         }
 
-        public static void ArchiveZip(
+        public static string ArchiveZip(
             string zipPath,
             string archiveDirectory,
             int year,
@@ -1013,6 +1166,191 @@ namespace FattureViewer.ViewModels
             string archivePath = ExtractionEngine.GetAvailablePath(
                 Path.Combine(archiveDirectory, archiveName));
             File.Move(zipPath, archivePath);
+            return archivePath;
+        }
+
+        private void ExecuteRollbackImport(object obj)
+        {
+            LastImportRecord? record;
+            try
+            {
+                record = _lastImportService.Load();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Annullamento non disponibile",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
+            if (record == null)
+            {
+                MessageBox.Show(
+                    "Non esiste un'importazione annullabile.",
+                    "Annulla ultima importazione",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+            if (record.Section != ActiveSection)
+            {
+                MessageBox.Show(
+                    $"L'ultima importazione appartiene alla sezione {record.Section.ToStorageValue()}.",
+                    "Sezione diversa",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var passwordWindow = new PasswordWindow(PasswordMode.Rollback)
+            {
+                Owner = Application.Current?.MainWindow
+            };
+            if (passwordWindow.ShowDialog() != true)
+                return;
+
+            string period = record.Section == InvoiceSection.Suppliers &&
+                            record.Year > 0
+                ? $"\nPeriodo archivio: {record.Month:D2}/{record.Year}."
+                : string.Empty;
+            MessageBoxResult confirmation = MessageBox.Show(
+                $"Annullare l'ultima importazione {record.Section.ToStorageValue()} " +
+                $"di {record.ImportedFileNames.Count} fatture?{period}\n\n" +
+                "Verranno rimossi solamente i dati e i file registrati da quell'importazione.",
+                "Conferma annullamento",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                LastImportService.Rollback(
+                    record,
+                    ActiveSection,
+                    ActivePermanentDatabase);
+                _lastImportService.Clear();
+                SelectedInvoice = null;
+                LoadInvoices(refresh: true);
+                MessageBox.Show(
+                    "Ultima importazione annullata.",
+                    "Annullamento completato",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Annullamento non completato. Il registro è stato conservato per un nuovo tentativo.\n\n" +
+                    ex.Message,
+                    "Errore annullamento",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+
+        public static List<string> GetDeletionIds(
+            object? target,
+            IEnumerable<InvoiceData>? allPermanentInvoices = null)
+        {
+            IEnumerable<InvoiceData> invoices = target switch
+            {
+                YearNode year when allPermanentInvoices != null && year.Year > 0 =>
+                    allPermanentInvoices.Where(invoice =>
+                        invoice.Year == year.Year),
+                MonthNode month when allPermanentInvoices != null &&
+                                         month.Year > 0 &&
+                                         month.Month > 0 =>
+                    allPermanentInvoices.Where(invoice =>
+                        invoice.Year == month.Year &&
+                        invoice.Month == month.Month),
+                InvoiceData invoice => new[] { invoice },
+                InvoiceNode invoiceNode => new[] { invoiceNode.Data },
+                MonthNode month => month.Invoices.Select(node => node.Data),
+                YearNode year => year.Months
+                    .SelectMany(month => month.Invoices)
+                    .Select(node => node.Data),
+                _ => Enumerable.Empty<InvoiceData>()
+            };
+
+            return invoices
+                .Where(invoice => !invoice.IsTemporary)
+                .Select(invoice => invoice.Id)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private void ExecuteDeleteSelection(object obj)
+        {
+            DeletePermanentInvoices(
+                GetDeletionIds(
+                    SelectedDeletionTarget,
+                    ActivePermanentDatabase.GetAllInvoices()),
+                DeleteSelectionMenuText);
+        }
+
+        private void ExecuteDeleteAllSection(object obj)
+        {
+            DeletePermanentInvoices(
+                ActivePermanentDatabase.GetAllInvoices()
+                    .Select(invoice => invoice.Id)
+                    .ToList(),
+                DeleteAllSectionMenuText);
+        }
+
+        private void DeletePermanentInvoices(
+            IReadOnlyCollection<string> invoiceIds,
+            string description)
+        {
+            if (!IsAdminDeletionEnabled)
+                return;
+            if (invoiceIds.Count == 0)
+            {
+                MessageBox.Show(
+                    "La selezione non contiene fatture permanenti da eliminare.",
+                    "Nessuna fattura",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            MessageBoxResult confirmation = MessageBox.Show(
+                $"ATTENZIONE: {description}?\n\n" +
+                $"Verranno eliminate definitivamente {invoiceIds.Count} fatture dal database " +
+                $"{ActiveSection.ToStorageValue()}.\n" +
+                "ZIP e file nell'Archivio non verranno cancellati.\n\n" +
+                "L'operazione non può essere annullata. Continuare?",
+                "Eliminazione amministratore",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Stop,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes)
+                return;
+
+            int deleted = ActivePermanentDatabase.DeleteInvoices(invoiceIds);
+            try
+            {
+                if (_lastImportService.Load()?.Section == ActiveSection)
+                    _lastImportService.Clear();
+            }
+            catch
+            {
+                _lastImportService.Clear();
+            }
+
+            SelectedDeletionTarget = null;
+            SelectedInvoice = null;
+            LoadInvoices(refresh: true);
+            MessageBox.Show(
+                $"Eliminate {deleted} fatture dal database.",
+                "Eliminazione completata",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         private void ExecuteClear(object obj)
@@ -1025,6 +1363,16 @@ namespace FattureViewer.ViewModels
                 return;
 
             ActivePermanentDatabase.ClearAll();
+            try
+            {
+                if (_lastImportService.Load()?.Section == ActiveSection)
+                    _lastImportService.Clear();
+            }
+            catch
+            {
+                // Svuotamento già eseguito: registro corrotto non può ripristinare dati.
+                _lastImportService.Clear();
+            }
             SelectedInvoice = null;
             LoadInvoices(refresh: true);
         }
