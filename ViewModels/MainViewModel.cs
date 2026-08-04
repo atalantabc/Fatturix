@@ -26,7 +26,7 @@ namespace FattureViewer.ViewModels
         private LastImportService _lastImportService;
         private readonly SessionDatabaseService _sessionDatabase;
         private readonly Dictionary<InvoiceSection, List<InvoiceData>> _invoiceCache = new();
-        private readonly Dictionary<InvoiceSection, ObservableCollection<YearNode>> _treeCache = new();
+        private readonly Dictionary<InvoiceSection, ObservableCollection<TreeItemNode>> _treeCache = new();
         private bool _disposed;
         private object? _selectedDeletionTarget;
 
@@ -63,8 +63,8 @@ namespace FattureViewer.ViewModels
         public ObservableCollection<InvoiceData> Invoices { get; private set; } =
             new ObservableCollection<InvoiceData>();
 
-        public ObservableCollection<YearNode> InvoiceTree { get; private set; } =
-            new ObservableCollection<YearNode>();
+        public ObservableCollection<TreeItemNode> InvoiceTree { get; private set; } =
+            new ObservableCollection<TreeItemNode>();
 
         public ObservableCollection<InvoiceData> FlatSearchResults { get; private set; } =
             new ObservableCollection<InvoiceData>();
@@ -347,7 +347,8 @@ namespace FattureViewer.ViewModels
                 SearchCompany,
                 IsInvoiceNumberSearchEnabled
                     ? SearchInvoiceNumber
-                    : string.Empty);
+                    : string.Empty,
+                ActiveSection == InvoiceSection.Suppliers);
             Invoices = new ObservableCollection<InvoiceData>(result);
             OnPropertyChanged(nameof(Invoices));
             BuildTree(result);
@@ -358,7 +359,8 @@ namespace FattureViewer.ViewModels
             int? year,
             int? month,
             string? companyName,
-            string? invoiceNumber = null)
+            string? invoiceNumber = null,
+            bool companyNameStartsWith = false)
         {
             IEnumerable<InvoiceData> filtered = invoices;
             if (year is > 0)
@@ -367,10 +369,15 @@ namespace FattureViewer.ViewModels
                 filtered = filtered.Where(invoice => invoice.Month == month.Value);
             if (!string.IsNullOrWhiteSpace(companyName))
             {
+                string normalizedCompanyName = companyName.Trim();
                 filtered = filtered.Where(invoice =>
-                    invoice.DisplayPartyName.Contains(
-                        companyName,
-                        StringComparison.OrdinalIgnoreCase));
+                    companyNameStartsWith
+                        ? invoice.DisplayPartyName.TrimStart().StartsWith(
+                            normalizedCompanyName,
+                            StringComparison.OrdinalIgnoreCase)
+                        : invoice.DisplayPartyName.Contains(
+                            normalizedCompanyName,
+                            StringComparison.OrdinalIgnoreCase));
             }
             if (!string.IsNullOrWhiteSpace(invoiceNumber))
             {
@@ -398,10 +405,15 @@ namespace FattureViewer.ViewModels
 
         private void BuildTree(List<InvoiceData> invoices)
         {
-            IsFlatSearch = ShouldUseFlatSearch(
+            bool groupSupplierResults = ShouldGroupSupplierSearchResults(
+                ActiveSection,
                 SearchCompany,
-                FilterMonth,
-                SearchInvoiceNumber);
+                SearchInvoiceNumber,
+                invoices);
+            IsFlatSearch = !groupSupplierResults && ShouldUseFlatSearch(
+                    SearchCompany,
+                    FilterMonth,
+                    SearchInvoiceNumber);
             FlatSearchResults = IsFlatSearch
                 ? Invoices
                 : new ObservableCollection<InvoiceData>();
@@ -412,13 +424,20 @@ namespace FattureViewer.ViewModels
                 return;
             }
 
+            if (groupSupplierResults)
+            {
+                InvoiceTree = CreateSupplierSearchTree(invoices);
+                OnPropertyChanged(nameof(InvoiceTree));
+                return;
+            }
+
             bool unfiltered =
                 string.IsNullOrWhiteSpace(SearchCompany) &&
                 string.IsNullOrWhiteSpace(SearchInvoiceNumber) &&
                 !FilterYear.HasValue &&
                 !FilterMonth.HasValue;
             if (unfiltered &&
-                _treeCache.TryGetValue(ActiveSection, out ObservableCollection<YearNode>? cachedTree))
+                _treeCache.TryGetValue(ActiveSection, out ObservableCollection<TreeItemNode>? cachedTree))
             {
                 InvoiceTree = cachedTree;
                 OnPropertyChanged(nameof(InvoiceTree));
@@ -429,10 +448,10 @@ namespace FattureViewer.ViewModels
             OnPropertyChanged(nameof(InvoiceTree));
         }
 
-        private static ObservableCollection<YearNode> CreateTree(
+        private static ObservableCollection<TreeItemNode> CreateTree(
             IEnumerable<InvoiceData> invoices)
         {
-            var tree = new ObservableCollection<YearNode>();
+            var tree = new ObservableCollection<TreeItemNode>();
             int currentYear = DateTime.Now.Year;
             int currentMonth = DateTime.Now.Month;
             foreach (IGrouping<int, InvoiceData> yearGroup in invoices
@@ -486,6 +505,37 @@ namespace FattureViewer.ViewModels
             return tree;
         }
 
+        private static ObservableCollection<TreeItemNode> CreateSupplierSearchTree(
+            IEnumerable<InvoiceData> invoices)
+        {
+            var tree = new ObservableCollection<TreeItemNode>();
+            foreach (IGrouping<string, InvoiceData> companyGroup in invoices
+                         .GroupBy(
+                             invoice => invoice.DisplayPartyName.Trim(),
+                             StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var companyNode = new CompanyNode
+                {
+                    Name = companyGroup.Key,
+                    IsExpanded = true
+                };
+                foreach (InvoiceData invoice in companyGroup.OrderBy(item => item.Date))
+                {
+                    string temporaryLabel = invoice.IsTemporary
+                        ? " • Temporanea"
+                        : string.Empty;
+                    companyNode.Invoices.Add(new InvoiceNode
+                    {
+                        Name = $"{invoice.Date:dd/MM/yyyy} - Fattura {invoice.InvoiceNumber}{temporaryLabel}",
+                        Data = invoice
+                    });
+                }
+                tree.Add(companyNode);
+            }
+            return tree;
+        }
+
         public static bool ShouldUseFlatSearch(
             string? companyName,
             int? month,
@@ -502,6 +552,22 @@ namespace FattureViewer.ViewModels
         {
             return section == InvoiceSection.Customers ||
                    !string.IsNullOrWhiteSpace(companyName);
+        }
+
+        public static bool ShouldGroupSupplierSearchResults(
+            InvoiceSection section,
+            string? companyName,
+            string? invoiceNumber,
+            IEnumerable<InvoiceData> invoices)
+        {
+            return section == InvoiceSection.Suppliers &&
+                   !string.IsNullOrWhiteSpace(companyName) &&
+                   !string.IsNullOrWhiteSpace(invoiceNumber) &&
+                   invoices
+                       .Select(invoice => invoice.DisplayPartyName.Trim())
+                       .Distinct(StringComparer.OrdinalIgnoreCase)
+                       .Take(2)
+                       .Count() > 1;
         }
 
         private void ExecuteSetPath(object obj)

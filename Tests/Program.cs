@@ -233,6 +233,49 @@ Assert(
     MainViewModel.ShouldUseFlatSearch("", null, "100"),
     "Ricerca per solo numero fattura non usa la lista risultati.");
 
+var supplierPrefixInvoices = new List<InvoiceData>
+{
+    new() { Id = "blu-7", DisplayPartyName = "Pinco Pallino Blu", InvoiceNumber = "7" },
+    new() { Id = "rosso-7", DisplayPartyName = "Pinco Pallino Rosso", InvoiceNumber = "7" },
+    new() { Id = "verde-8", DisplayPartyName = "Pinco Pallino Verde", InvoiceNumber = "8" },
+    new() { Id = "altro-7", DisplayPartyName = "Altro Pinco", InvoiceNumber = "7" }
+};
+List<InvoiceData> supplierPrefixMatches = MainViewModel.FilterCachedInvoices(
+    supplierPrefixInvoices,
+    null,
+    null,
+    "Pinco",
+    "7",
+    companyNameStartsWith: true);
+Assert(
+    supplierPrefixMatches.Select(invoice => invoice.Id)
+        .SequenceEqual(new[] { "blu-7", "rosso-7" }),
+    "Ricerca Fornitori non combina prefisso azienda e numero esatto.");
+Assert(
+    MainViewModel.FilterCachedInvoices(
+            supplierPrefixInvoices,
+            null,
+            null,
+            "Pinco Pallino Blu",
+            "7",
+            companyNameStartsWith: true)
+        .Single().Id == "blu-7",
+    "Ricerca Fornitori con nome completo e numero non trova la fattura.");
+Assert(
+    MainViewModel.ShouldGroupSupplierSearchResults(
+        InvoiceSection.Suppliers,
+        "Pinco",
+        "7",
+        supplierPrefixMatches),
+    "Più fornitori con lo stesso numero non vengono raggruppati.");
+Assert(
+    !MainViewModel.ShouldGroupSupplierSearchResults(
+        InvoiceSection.Suppliers,
+        "Pinco Pallino Blu",
+        "7",
+        supplierPrefixMatches.Take(1)),
+    "Un solo fornitore viene raggruppato inutilmente.");
+
 DateTime julySuggestion = ImportPeriodWindow.GetSuggestedPeriod(
     new DateTime(2026, 8, 15));
 Assert(

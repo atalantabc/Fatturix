@@ -48,6 +48,11 @@ namespace FattureViewer.ViewModels
         public ObservableCollection<InvoiceNode> Invoices { get; set; } = new ObservableCollection<InvoiceNode>();
     }
 
+    public class CompanyNode : TreeItemNode
+    {
+        public ObservableCollection<InvoiceNode> Invoices { get; set; } = new ObservableCollection<InvoiceNode>();
+    }
+
     public class InvoiceNode : TreeItemNode
     {
         public InvoiceData Data { get; set; }
