@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:FattureViewer"
         xmlns:viewmodels="clr-namespace:FattureViewer.ViewModels"
         mc:Ignorable="d"
-        Title="Visualizzatore Fatture"
+        Title="{Binding WindowTitle}"
         Height="800"
         Width="1250"
         WindowStartupLocation="CenterScreen"
@@ -277,11 +277,13 @@
                                   Background="White">
                             <MenuItem Header="Imposta percorso Fatture Passive..."
                                       Command="{Binding SetPathCommand}"
+                                      Visibility="{Binding SupportsPassiveArchive, Converter={StaticResource BoolToVisibility}}"
                                       FontSize="13"/>
                             <MenuItem Header="{Binding ImportDatabaseMenuText}"
                                       Command="{Binding ImportDatabaseCommand}"
+                                      Visibility="{Binding SupportsPassiveArchive, Converter={StaticResource BoolToVisibility}}"
                                       FontSize="13"/>
-                            <MenuItem Header="Imposta percorso database..."
+                            <MenuItem Header="{Binding SetDatabasePathMenuText}"
                                       Command="{Binding SetDatabasePathCommand}"
                                       FontSize="13"/>
                             <Separator/>
@@ -310,6 +312,19 @@
                             Padding="9,1"
                             VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <Border Grid.Column="1"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="#EEF4FB"
+                        BorderBrush="#B7CCE2"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="12,5">
+                    <TextBlock Text="{Binding ProfileName, StringFormat='Profilo: {0}'}"
+                               FontWeight="Bold"
+                               Foreground="#24527A"/>
+                </Border>
 
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"

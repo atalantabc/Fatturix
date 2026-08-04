@@ -12,6 +12,8 @@ namespace FattureViewerInstaller
             bool silent = HasArgument(args, "--silent");
             bool restart = HasArgument(args, "--restart");
             bool noShortcuts = HasArgument(args, "--no-shortcuts");
+            string restartProfile =
+                GetRawStringArgument(args, "--restart-profile") ?? "omt";
             int? parentProcessId = GetIntegerArgument(args, "--parent-pid");
             string? customInstallDirectory =
                 GetStringArgument(args, "--install-dir");
@@ -76,7 +78,7 @@ namespace FattureViewerInstaller
             finally
             {
                 if (restart && File.Exists(applicationPath))
-                    StartApplication(applicationPath);
+                    StartApplication(applicationPath, restartProfile);
             }
 
             if (!silent)
@@ -119,7 +121,6 @@ namespace FattureViewerInstaller
                 {
                     // Il processo è già terminato.
                 }
-                return;
             }
 
             if (!waitForAnyApplicationInstance)
@@ -212,24 +213,49 @@ namespace FattureViewerInstaller
 
         private static void EnsureShortcuts(string applicationPath, bool silent)
         {
-            string desktopShortcut = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                "FattureViewer.lnk");
-            if (!File.Exists(desktopShortcut))
-                CreateShortcut(applicationPath, desktopShortcut, silent);
+            string desktopDirectory =
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            DeleteIfExists(Path.Combine(desktopDirectory, "FattureViewer.lnk"));
+            CreateShortcut(
+                applicationPath,
+                Path.Combine(desktopDirectory, "FattureViewer OMT.lnk"),
+                "--profile omt",
+                "FattureViewer - Profilo OMT",
+                silent);
+            CreateShortcut(
+                applicationPath,
+                Path.Combine(desktopDirectory, "FattureViewer C.CASE.lnk"),
+                "--profile ccase",
+                "FattureViewer - Profilo C.CASE",
+                silent);
 
             string startMenuDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
                 "Programs");
             if (Directory.Exists(startMenuDirectory))
             {
-                string startMenuShortcut = Path.Combine(startMenuDirectory, "FattureViewer.lnk");
-                if (!File.Exists(startMenuShortcut))
-                    CreateShortcut(applicationPath, startMenuShortcut, silent);
+                DeleteIfExists(Path.Combine(startMenuDirectory, "FattureViewer.lnk"));
+                CreateShortcut(
+                    applicationPath,
+                    Path.Combine(startMenuDirectory, "FattureViewer OMT.lnk"),
+                    "--profile omt",
+                    "FattureViewer - Profilo OMT",
+                    silent);
+                CreateShortcut(
+                    applicationPath,
+                    Path.Combine(startMenuDirectory, "FattureViewer C.CASE.lnk"),
+                    "--profile ccase",
+                    "FattureViewer - Profilo C.CASE",
+                    silent);
             }
         }
 
-        private static void CreateShortcut(string targetPath, string shortcutPath, bool silent)
+        private static void CreateShortcut(
+            string targetPath,
+            string shortcutPath,
+            string arguments,
+            string description,
+            bool silent)
         {
             try
             {
@@ -243,8 +269,9 @@ namespace FattureViewerInstaller
 
                 dynamic shortcut = shell.CreateShortcut(shortcutPath);
                 shortcut.TargetPath = targetPath;
+                shortcut.Arguments = arguments;
                 shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
-                shortcut.Description = "Visualizzatore di Fatture Elettroniche";
+                shortcut.Description = description;
                 shortcut.IconLocation = targetPath + ",0";
                 shortcut.Save();
             }
@@ -259,13 +286,20 @@ namespace FattureViewerInstaller
             }
         }
 
-        private static void StartApplication(string applicationPath)
+        private static void StartApplication(
+            string applicationPath,
+            string profile)
         {
             try
             {
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = applicationPath,
+                    Arguments = profile.Equals(
+                        "ccase",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? "--profile ccase"
+                        : "--profile omt",
                     WorkingDirectory = Path.GetDirectoryName(applicationPath)!,
                     UseShellExecute = true
                 });
@@ -300,6 +334,17 @@ namespace FattureViewerInstaller
                 if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase) &&
                     !string.IsNullOrWhiteSpace(args[index + 1]))
                     return Path.GetFullPath(args[index + 1]);
+            }
+            return null;
+        }
+
+        private static string? GetRawStringArgument(string[] args, string name)
+        {
+            for (int index = 0; index < args.Length - 1; index++)
+            {
+                if (args[index].Equals(name, StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(args[index + 1]))
+                    return args[index + 1].Trim();
             }
             return null;
         }

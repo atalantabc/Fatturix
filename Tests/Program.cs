@@ -17,6 +17,60 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception(message);
 }
 
+AppProfileDefinition omtProfile = AppProfileService.ParseProfile(
+    new[] { "FattureViewer.exe", "--profile", "omt" });
+AppProfileDefinition ccaseProfile = AppProfileService.ParseProfile(
+    new[] { "FattureViewer.exe", "--profile", "ccase" });
+Assert(
+    omtProfile.Kind == AppProfileKind.Omt &&
+    omtProfile.SupportsPassiveArchive &&
+    ccaseProfile.Kind == AppProfileKind.CCase &&
+    !ccaseProfile.SupportsPassiveArchive,
+    "I profili OMT e C.CASE non applicano le funzioni previste.");
+Assert(
+    !string.Equals(
+        AppProfileService.GetPasswordFilePath(omtProfile),
+        AppProfileService.GetPasswordFilePath(ccaseProfile),
+        StringComparison.OrdinalIgnoreCase),
+    "OMT e C.CASE condividono la password database.");
+Assert(
+    !string.Equals(
+        AppSettingsService.GetDefaultStorageDirectory(
+            ccaseProfile,
+            InvoiceSection.Suppliers),
+        AppSettingsService.GetDefaultStorageDirectory(
+            ccaseProfile,
+            InvoiceSection.Customers),
+        StringComparison.OrdinalIgnoreCase),
+    "I database C.CASE Fornitori e Clienti usano la stessa cartella.");
+
+string profileIsolationRoot = Path.Combine(
+    Path.GetTempPath(),
+    "FattureViewerProfileIsolation_" + Guid.NewGuid().ToString("N"));
+try
+{
+    AppSettingsService.EnsureStorageOwnership(profileIsolationRoot, "OMT");
+    bool collisionBlocked = false;
+    try
+    {
+        AppSettingsService.EnsureStorageOwnership(
+            profileIsolationRoot,
+            "C.CASE-FORNITORI");
+    }
+    catch (InvalidOperationException)
+    {
+        collisionBlocked = true;
+    }
+    Assert(
+        collisionBlocked,
+        "Una cartella database OMT può essere assegnata anche a C.CASE.");
+}
+finally
+{
+    if (Directory.Exists(profileIsolationRoot))
+        Directory.Delete(profileIsolationRoot, true);
+}
+
 static byte[] CreateInvoiceXml(
     string fileNumber,
     string senderName,

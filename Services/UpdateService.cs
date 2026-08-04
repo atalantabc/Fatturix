@@ -28,6 +28,7 @@ namespace FattureViewer.Services
     {
         private const string ReleasesUrl = "https://api.github.com/repos/atalantabc/Fatturix/releases?per_page=30";
         private static readonly HttpClient HttpClient = CreateHttpClient();
+        private static Mutex? _updateOwnerMutex;
 
         public static Version CurrentVersion =>
             NormalizeVersion(Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0));
@@ -49,6 +50,28 @@ namespace FattureViewer.Services
 
             string json = await response.Content.ReadAsStringAsync(timeout.Token);
             return SelectEligibleRelease(json, CurrentVersion);
+        }
+
+        public static bool TryBecomeUpdateOwner()
+        {
+            if (_updateOwnerMutex != null)
+                return true;
+
+            var mutex = new Mutex(false, @"Local\FattureViewer.UpdateOwner");
+            try
+            {
+                if (!mutex.WaitOne(0))
+                {
+                    mutex.Dispose();
+                    return false;
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                // Il precedente processo è terminato: questo profilo diventa proprietario.
+            }
+            _updateOwnerMutex = mutex;
+            return true;
         }
 
         public static UpdateInfo? SelectEligibleRelease(string releasesJson, Version currentVersion)
@@ -153,10 +176,13 @@ namespace FattureViewer.Services
 
         public static void StartInstaller(string installerPath)
         {
+            EnsureOtherProfilesClosed();
             var startInfo = new ProcessStartInfo
             {
                 FileName = installerPath,
-                Arguments = $"--update --silent --parent-pid {Environment.ProcessId} --restart",
+                Arguments =
+                    $"--update --silent --parent-pid {Environment.ProcessId} " +
+                    $"--restart --restart-profile {AppProfileService.Current.Id}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(installerPath)!
@@ -164,6 +190,16 @@ namespace FattureViewer.Services
 
             if (Process.Start(startInfo) == null)
                 throw new InvalidOperationException("Impossibile avviare l'installer dell'aggiornamento.");
+        }
+
+        public static void EnsureOtherProfilesClosed()
+        {
+            bool anotherProfileIsOpen = Process
+                .GetProcessesByName("FattureViewer")
+                .Any(process => process.Id != Environment.ProcessId);
+            if (anotherProfileIsOpen)
+                throw new InvalidOperationException(
+                    "Chiudi l'altro profilo FattureViewer prima di installare l'aggiornamento.");
         }
 
         private static UpdateInfo? CreateUpdateInfo(GitHubRelease release)

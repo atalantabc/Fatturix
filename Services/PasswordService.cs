@@ -7,7 +7,8 @@ namespace FattureViewer.Services
 {
     public class PasswordService
     {
-        private static readonly string PasswordFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "password.dat");
+        private static string PasswordFilePath =>
+            AppProfileService.GetPasswordFilePath();
 
         // Use a static entropy for slight additional obfuscation (optional)
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("FattureViewer_SecureEntropy_2026");
@@ -26,7 +27,8 @@ namespace FattureViewer.Services
             
             // Encrypt using DPAPI - scope set to CurrentUser so only the current Windows user can decrypt it
             byte[] encryptedBytes = ProtectedData.Protect(plainBytes, Entropy, DataProtectionScope.CurrentUser);
-            
+
+            Directory.CreateDirectory(Path.GetDirectoryName(PasswordFilePath)!);
             File.WriteAllBytes(PasswordFilePath, encryptedBytes);
         }
 

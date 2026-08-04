@@ -17,8 +17,6 @@ namespace FattureViewer.ViewModels
 {
     public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
-        private const string SettingsRegistryPath = @"HKEY_CURRENT_USER\Software\FattureViewer";
-        private const string PassiveDirectoryValue = "FatturePassiveDirectory";
         private const string CustomerDatabaseFileName = "fattureClienti.db";
 
         private DatabaseService _supplierDatabase;
@@ -32,15 +30,21 @@ namespace FattureViewer.ViewModels
 
         public MainViewModel()
         {
-            _supplierDatabase = new DatabaseService();
+            _supplierDatabase = new DatabaseService(
+                AppSettingsService.GetStorageDirectory(
+                    InvoiceSection.Suppliers));
             _customerDatabase = new DatabaseService(
-                _supplierDatabase.StorageDirectory,
+                AppSettingsService.GetStorageDirectory(
+                    InvoiceSection.Customers),
                 migrateLegacyDatabase: false,
                 databaseFileName: CustomerDatabaseFileName,
                 hydrateLegacyContent: false);
             _lastImportService = new LastImportService(
-                _supplierDatabase.StorageDirectory);
-            _sessionDatabase = new SessionDatabaseService();
+                AppProfileService.Current.Kind == AppProfileKind.Omt
+                    ? _supplierDatabase.StorageDirectory
+                    : AppProfileService.GetProfileDataDirectory());
+            _sessionDatabase = new SessionDatabaseService(
+                AppProfileService.GetSessionDirectory());
 
             ImportCommand = new RelayCommand(ExecuteImport);
             ImportDatabaseCommand = new RelayCommand(ExecuteImportDatabase);
@@ -211,6 +215,7 @@ namespace FattureViewer.ViewModels
                 OnPropertyChanged(nameof(ClearDatabaseMenuText));
                 OnPropertyChanged(nameof(SearchLabel));
                 OnPropertyChanged(nameof(DeleteAllSectionMenuText));
+                OnPropertyChanged(nameof(SetDatabasePathMenuText));
                 LoadInvoiceContent();
                 LoadInvoices();
             }
@@ -230,7 +235,9 @@ namespace FattureViewer.ViewModels
         }
 
         public string ImportButtonText =>
-            ActiveSection == InvoiceSection.Customers
+            !SupportsPassiveArchive
+                ? ImportDatabaseMenuText.TrimEnd('.')
+                : ActiveSection == InvoiceSection.Customers
                 ? "Importa ZIP Clienti"
                 : "Importa ZIP Fornitori";
 
@@ -251,6 +258,16 @@ namespace FattureViewer.ViewModels
 
         public string VersionMenuText =>
             $"Versione {GetApplicationVersion()}";
+
+        public string ProfileName => AppProfileService.Current.DisplayName;
+        public string WindowTitle =>
+            $"Visualizzatore Fatture - {ProfileName}";
+        public bool SupportsPassiveArchive =>
+            AppProfileService.Current.SupportsPassiveArchive;
+        public string SetDatabasePathMenuText =>
+            AppProfileService.Current.Kind == AppProfileKind.Omt
+                ? "Imposta percorso database..."
+                : $"Imposta percorso database {ActiveSection.ToStorageValue()}...";
 
         public ICommand ImportCommand { get; }
         public ICommand ImportDatabaseCommand { get; }
@@ -572,6 +589,9 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteSetPath(object obj)
         {
+            if (!SupportsPassiveArchive)
+                return;
+
             string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
                 "Inserisci il percorso della cartella Fatture Passive. Verrà salvato e usato per le importazioni Fornitori:",
                 "Imposta percorso Fatture Passive",
@@ -591,10 +611,7 @@ namespace FattureViewer.ViewModels
 
             try
             {
-                Registry.SetValue(
-                    SettingsRegistryPath,
-                    PassiveDirectoryValue,
-                    passiveDir);
+                AppSettingsService.SetPassiveDirectory(passiveDir);
                 MessageBox.Show(
                     $"Percorso Fornitori salvato:\n\n{passiveDir}",
                     "Percorso salvato",
@@ -613,6 +630,12 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteImport(object obj)
         {
+            if (!SupportsPassiveArchive)
+            {
+                ExecuteImportDatabase(obj);
+                return;
+            }
+
             if (!EnsureImportsEnabled())
                 return;
 
@@ -977,6 +1000,12 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteSetDatabasePath(object obj)
         {
+            if (AppProfileService.Current.Kind == AppProfileKind.CCase)
+            {
+                PromptAndSetProfileDatabasePath(ActiveSection, initialSetup: false);
+                return;
+            }
+
             string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
                 "Inserisci la cartella principale dei database. Sono supportati anche percorsi di rete, ad esempio \\\\SERVER\\Fatture:",
                 "Imposta percorso database",
@@ -992,6 +1021,9 @@ namespace FattureViewer.ViewModels
                 LastImportService oldLastImportService = _lastImportService;
                 string newDirectory =
                     AppSettingsService.NormalizeStorageDirectory(selectedPath);
+                AppSettingsService.EnsureStorageOwnership(
+                    newDirectory,
+                    "OMT");
                 if (string.Equals(
                         newDirectory,
                         _supplierDatabase.StorageDirectory,
@@ -1054,6 +1086,108 @@ namespace FattureViewer.ViewModels
             }
         }
 
+        public void EnsureProfileSetup()
+        {
+            if (AppProfileService.Current.Kind != AppProfileKind.CCase)
+                return;
+
+            foreach (InvoiceSection section in new[]
+                     {
+                         InvoiceSection.Suppliers,
+                         InvoiceSection.Customers
+                     })
+            {
+                if (!AppSettingsService.IsStorageConfigured(section))
+                    PromptAndSetProfileDatabasePath(section, initialSetup: true);
+            }
+        }
+
+        private void PromptAndSetProfileDatabasePath(
+            InvoiceSection section,
+            bool initialSetup)
+        {
+            DatabaseService currentDatabase = section == InvoiceSection.Suppliers
+                ? _supplierDatabase
+                : _customerDatabase;
+            string sectionName = section.ToStorageValue();
+            string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Inserisci la cartella del database {sectionName} per il profilo C.CASE. " +
+                "Sono supportati anche percorsi di rete:",
+                initialSetup
+                    ? $"Configurazione C.CASE - {sectionName}"
+                    : $"Percorso database {sectionName}",
+                currentDatabase.StorageDirectory);
+            if (string.IsNullOrWhiteSpace(selectedPath))
+                return;
+
+            DatabaseService? replacement = null;
+            try
+            {
+                string newDirectory =
+                    AppSettingsService.NormalizeStorageDirectory(selectedPath);
+                AppSettingsService.EnsureStorageOwnership(
+                    newDirectory,
+                    section == InvoiceSection.Suppliers
+                        ? "C.CASE-FORNITORI"
+                        : "C.CASE-CLIENTI");
+
+                if (string.Equals(
+                        newDirectory,
+                        currentDatabase.StorageDirectory,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    AppSettingsService.SetStorageDirectory(section, newDirectory);
+                }
+                else
+                {
+                    replacement = new DatabaseService(
+                        newDirectory,
+                        migrateLegacyDatabase: false,
+                        databaseFileName: section == InvoiceSection.Suppliers
+                            ? "fatture.db"
+                            : CustomerDatabaseFileName,
+                        hydrateLegacyContent:
+                            section == InvoiceSection.Suppliers);
+                    replacement.SaveInvoices(
+                        currentDatabase.GetAllInvoicesWithContent());
+                    AppSettingsService.SetStorageDirectory(section, newDirectory);
+
+                    currentDatabase.Dispose();
+                    if (section == InvoiceSection.Suppliers)
+                        _supplierDatabase = replacement;
+                    else
+                        _customerDatabase = replacement;
+                    replacement = null;
+
+                    _invoiceCache.Remove(section);
+                    _treeCache.Remove(section);
+                    RefreshInvoiceCache(section);
+                    if (section == ActiveSection)
+                        FilterInvoices();
+                }
+
+                MessageBox.Show(
+                    $"Percorso database {sectionName} salvato per C.CASE:\n\n" +
+                    newDirectory,
+                    "Percorso database",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Impossibile usare il percorso indicato. La cartella non deve appartenere " +
+                    "a OMT o all'altro database C.CASE.\n\n" + ex.Message,
+                    "Errore percorso database",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                replacement?.Dispose();
+            }
+        }
+
         private void ExecuteAdmin(object obj)
         {
             var window = new AdminWindow(
@@ -1078,7 +1212,8 @@ namespace FattureViewer.ViewModels
         private void ExecuteShowVersion(object obj)
         {
             MessageBox.Show(
-                $"FattureViewer\nVersione {GetApplicationVersion()}",
+                $"FattureViewer - Profilo {ProfileName}\n" +
+                $"Versione {GetApplicationVersion()}",
                 "Informazioni versione",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -1222,11 +1357,7 @@ namespace FattureViewer.ViewModels
 
         private static string GetSavedPassiveDirectory()
         {
-            return Registry.GetValue(
-                       SettingsRegistryPath,
-                       PassiveDirectoryValue,
-                       "") as string ??
-                   string.Empty;
+            return AppSettingsService.GetPassiveDirectory();
         }
 
         public static bool TryGetPassiveDirectories(

@@ -18,10 +18,8 @@ namespace FattureViewer.Services
 
         public SessionDatabaseService(string? sessionDirectory = null)
         {
-            SessionDirectory = Path.GetFullPath(sessionDirectory ?? Path.Combine(
-                Path.GetTempPath(),
-                "FattureViewer",
-                "Session"));
+            SessionDirectory = Path.GetFullPath(
+                sessionDirectory ?? AppProfileService.GetSessionDirectory());
             Directory.CreateDirectory(SessionDirectory);
 
             string fileName =

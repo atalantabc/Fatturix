@@ -15,6 +15,7 @@ namespace FattureViewer
 
         public MainWindow()
         {
+            AppProfileService.ApplyWindowsIdentity();
             InitializeComponent();
             this.DataContext = new MainViewModel();
             this.Loaded += MainWindow_Loaded;
@@ -29,7 +30,10 @@ namespace FattureViewer
                 pwdWin.ShowDialog();
             }
 
-            if (!_updateCheckStarted)
+            if (DataContext is MainViewModel viewModel)
+                viewModel.EnsureProfileSetup();
+
+            if (!_updateCheckStarted && UpdateService.TryBecomeUpdateOwner())
             {
                 _updateCheckStarted = true;
                 await CheckForUpdatesAsync();

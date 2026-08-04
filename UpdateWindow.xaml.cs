@@ -24,6 +24,20 @@ namespace FattureViewer
 
         private async void InstallButton_Click(object sender, RoutedEventArgs e)
         {
+            try
+            {
+                UpdateService.EnsureOtherProfilesClosed();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Chiudi l'altro profilo",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             _installing = true;
             InstallButton.IsEnabled = false;
             CancelButton.IsEnabled = false;
