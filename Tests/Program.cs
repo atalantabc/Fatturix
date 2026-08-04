@@ -1100,6 +1100,52 @@ finally
         Directory.Delete(migrationTestDirectory, true);
 }
 
+string invoiceNumberBackfillDirectory = Path.Combine(
+    Path.GetTempPath(),
+    "FattureViewerInvoiceNumberBackfill_" + Guid.NewGuid().ToString("N"));
+try
+{
+    byte[] versatileNumberXml = CreateInvoiceXml(
+        " FT 7 / 2026 A ",
+        "FORNITORE FORMATI",
+        "IT01234567890",
+        "O.M.T.",
+        "IT02745400164");
+    using (var database = new DatabaseService(
+               invoiceNumberBackfillDirectory,
+               migrateLegacyDatabase: false))
+    {
+        database.SaveInvoice(new InvoiceData
+        {
+            Id = "numero-da-ricostruire",
+            FileName = "fattura-formati.xml",
+            Date = new DateTime(2026, 7, 28),
+            Year = 2026,
+            Month = 7,
+            Day = 28,
+            SenderName = "FORNITORE FORMATI",
+            InvoiceNumber = "",
+            FileContent = versatileNumberXml
+        });
+    }
+
+    using var reopened = new DatabaseService(
+        invoiceNumberBackfillDirectory,
+        migrateLegacyDatabase: false);
+    Assert(
+        reopened.GetAllInvoices().Single().InvoiceNumber == "FT 7 / 2026 A",
+        "Il numero fattura mancante non viene ricostruito dal contenuto XML conservando spazi interni e simboli.");
+    Assert(
+        InvoiceParser.ParseInvoice("fattura-formati.xml", versatileNumberXml).InvoiceNumber ==
+        "FT 7 / 2026 A",
+        "Il parser non legge numeri fattura alfanumerici con spazi e separatori.");
+}
+finally
+{
+    if (Directory.Exists(invoiceNumberBackfillDirectory))
+        Directory.Delete(invoiceNumberBackfillDirectory, true);
+}
+
 string databaseTestDir = Path.Combine(Path.GetTempPath(), "FattureViewerDatabaseTest_" + Guid.NewGuid().ToString("N"));
 try
 {

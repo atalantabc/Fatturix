@@ -38,6 +38,8 @@ namespace FattureViewer.Services
                 HydrateMissingContentFromLegacyPaths();
             if (migrateLegacyDatabase && !_db.Table<InvoiceData>().Any())
                 ImportLegacyDatabase();
+            if (hydrateLegacyContent)
+                BackfillMissingInvoiceNumbers();
         }
 
         public void SaveInvoice(InvoiceData invoice)
@@ -228,6 +230,29 @@ RecipientCode, InvoiceNumber, TotalAmount, Section FROM InvoiceData";
             {
                 TryHydrateFromOriginalPath(invoice);
             }
+        }
+
+        private void BackfillMissingInvoiceNumbers()
+        {
+            List<InvoiceData> missing = _db.Query<InvoiceData>(
+                "SELECT * FROM InvoiceData WHERE InvoiceNumber IS NULL OR trim(InvoiceNumber) = ''");
+            var recovered = new List<InvoiceData>();
+            foreach (InvoiceData invoice in missing)
+            {
+                if (invoice.FileContent == null || invoice.FileContent.Length == 0)
+                    continue;
+
+                InvoiceData parsed = InvoiceParser.ParseInvoice(
+                    invoice.FileName,
+                    invoice.FileContent);
+                if (string.IsNullOrWhiteSpace(parsed.InvoiceNumber))
+                    continue;
+
+                invoice.InvoiceNumber = parsed.InvoiceNumber;
+                recovered.Add(invoice);
+            }
+            if (recovered.Count > 0)
+                _db.RunInTransaction(() => recovered.ForEach(invoice => _db.Update(invoice)));
         }
 
         private void ImportLegacyDatabase()
