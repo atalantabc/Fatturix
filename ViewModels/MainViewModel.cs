@@ -7,6 +7,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using FattureViewer.Models;
@@ -19,24 +20,18 @@ namespace FattureViewer.ViewModels
     {
         private const string CustomerDatabaseFileName = "fattureClienti.db";
 
-        private DatabaseService _supplierDatabase;
+        private DatabaseService? _supplierDatabase;
         private DatabaseService? _customerDatabase;
-        private LastImportService _lastImportService;
+        private LastImportService? _lastImportService;
         private SessionDatabaseService? _sessionDatabase;
         private readonly Dictionary<InvoiceSection, List<InvoiceData>> _invoiceCache = new();
         private readonly Dictionary<InvoiceSection, ObservableCollection<TreeItemNode>> _treeCache = new();
         private bool _disposed;
+        private bool _initialLoadStarted;
         private object? _selectedDeletionTarget;
 
         public MainViewModel()
         {
-            _supplierDatabase = new DatabaseService(
-                AppSettingsService.GetStorageDirectory(
-                    InvoiceSection.Suppliers));
-            _lastImportService = new LastImportService(
-                AppProfileService.Current.Kind == AppProfileKind.Omt
-                    ? _supplierDatabase.StorageDirectory
-                    : AppProfileService.GetProfileDataDirectory());
             ImportCommand = new RelayCommand(ExecuteImport);
             ImportDatabaseCommand = new RelayCommand(ExecuteImportDatabase);
             ClearCommand = new RelayCommand(ExecuteClear);
@@ -50,7 +45,55 @@ namespace FattureViewer.ViewModels
             IsAdminDeletionEnabled =
                 AppSettingsService.IsAdminDeletionEnabled();
 
-            LoadInvoices();
+        }
+
+        private bool _isInitialLoading = true;
+        public bool IsInitialLoading
+        {
+            get => _isInitialLoading;
+            private set
+            {
+                if (_isInitialLoading == value)
+                    return;
+                _isInitialLoading = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(WorkspaceContent));
+            }
+        }
+
+        public object? WorkspaceContent => IsInitialLoading ? null : this;
+
+        public async Task LoadInitialDataAsync()
+        {
+            if (_initialLoadStarted)
+                return;
+            _initialLoadStarted = true;
+            IsInitialLoading = true;
+            try
+            {
+                InvoiceSection section = ActiveSection;
+                (List<InvoiceData> Invoices,
+                    ObservableCollection<TreeItemNode> Tree) snapshot =
+                    await Task.Run(() => CreateInitialSnapshot(section));
+                if (_disposed)
+                    return;
+
+                _invoiceCache[section] = snapshot.Invoices;
+                _treeCache[section] = snapshot.Tree;
+                FilterInvoices();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Impossibile caricare il database.\n\n" + ex.Message,
+                    "Errore caricamento",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsInitialLoading = false;
+            }
         }
 
         public ObservableCollection<InvoiceData> Invoices { get; private set; } =
@@ -307,13 +350,18 @@ namespace FattureViewer.ViewModels
         private DatabaseService ActivePermanentDatabase =>
             GetPermanentDatabase(ActiveSection);
 
+        private DatabaseService SupplierDatabase =>
+            _supplierDatabase ??= CreateDatabase(InvoiceSection.Suppliers);
+
         private DatabaseService CustomerDatabase =>
-            _customerDatabase ??= new DatabaseService(
-                AppSettingsService.GetStorageDirectory(
-                    InvoiceSection.Customers),
-                migrateLegacyDatabase: false,
-                databaseFileName: CustomerDatabaseFileName,
-                hydrateLegacyContent: false);
+            _customerDatabase ??= CreateDatabase(InvoiceSection.Customers);
+
+        private LastImportService LastImportService =>
+            _lastImportService ??= new LastImportService(
+                AppProfileService.Current.Kind == AppProfileKind.Omt
+                    ? AppSettingsService.GetStorageDirectory(
+                        InvoiceSection.Suppliers)
+                    : AppProfileService.GetProfileDataDirectory());
 
         private SessionDatabaseService SessionDatabase =>
             _sessionDatabase ??= new SessionDatabaseService(
@@ -322,7 +370,35 @@ namespace FattureViewer.ViewModels
         private DatabaseService GetPermanentDatabase(InvoiceSection section) =>
             section == InvoiceSection.Customers
                 ? CustomerDatabase
-                : _supplierDatabase;
+                : SupplierDatabase;
+
+        private static DatabaseService CreateDatabase(InvoiceSection section)
+        {
+            return new DatabaseService(
+                AppSettingsService.GetStorageDirectory(section),
+                migrateLegacyDatabase: section == InvoiceSection.Suppliers,
+                databaseFileName: section == InvoiceSection.Suppliers
+                    ? "fatture.db"
+                    : CustomerDatabaseFileName,
+                hydrateLegacyContent: section == InvoiceSection.Suppliers);
+        }
+
+        private static (List<InvoiceData> Invoices,
+            ObservableCollection<TreeItemNode> Tree) CreateInitialSnapshot(
+            InvoiceSection section)
+        {
+            using DatabaseService database = CreateDatabase(section);
+            List<InvoiceData> invoices = database.GetAllInvoices();
+            foreach (InvoiceData invoice in invoices)
+            {
+                invoice.IsTemporary = false;
+                PrepareForDisplay(invoice, section);
+            }
+            invoices = invoices
+                .OrderByDescending(invoice => invoice.Date)
+                .ToList();
+            return (invoices, CreateTree(invoices));
+        }
 
         private void LoadInvoices(bool refresh = false)
         {
@@ -356,6 +432,8 @@ namespace FattureViewer.ViewModels
         {
             if (!_invoiceCache.TryGetValue(ActiveSection, out List<InvoiceData>? invoices))
             {
+                if (IsInitialLoading)
+                    return;
                 RefreshInvoiceCache(ActiveSection);
                 invoices = _invoiceCache[ActiveSection];
             }
@@ -732,7 +810,7 @@ namespace FattureViewer.ViewModels
                     out extractedFiles);
 
                 databaseChanges =
-                    _supplierDatabase.SaveInvoicesForRollback(invoices);
+                    SupplierDatabase.SaveInvoicesForRollback(invoices);
                 CopyExtractedFilesToArchive(
                     extractedFiles,
                     extractDirectory,
@@ -746,7 +824,7 @@ namespace FattureViewer.ViewModels
                     periodWindow.ImportYear,
                     periodWindow.ImportMonth);
 
-                _lastImportService.Save(new LastImportRecord
+                LastImportService.Save(new LastImportRecord
                 {
                     Section = InvoiceSection.Suppliers,
                     DatabaseChanges = databaseChanges,
@@ -785,7 +863,7 @@ namespace FattureViewer.ViewModels
                                 ArchiveFiles = archiveFiles
                             },
                             InvoiceSection.Suppliers,
-                            _supplierDatabase);
+                            SupplierDatabase);
                     }
                     catch
                     {
@@ -882,7 +960,7 @@ namespace FattureViewer.ViewModels
                 database.SaveInvoicesForRollback(invoices);
             try
             {
-                _lastImportService.Save(new LastImportRecord
+                LastImportService.Save(new LastImportRecord
                 {
                     Section = section,
                     DatabaseChanges = changes,
@@ -1010,7 +1088,7 @@ namespace FattureViewer.ViewModels
             string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
                 "Inserisci la cartella principale dei database. Sono supportati anche percorsi di rete, ad esempio \\\\SERVER\\Fatture:",
                 "Imposta percorso database",
-                _supplierDatabase.StorageDirectory);
+                SupplierDatabase.StorageDirectory);
             if (string.IsNullOrWhiteSpace(selectedPath))
                 return;
 
@@ -1018,8 +1096,8 @@ namespace FattureViewer.ViewModels
             DatabaseService? newCustomerDatabase = null;
             try
             {
-                LastImportRecord? lastImport = _lastImportService.Load();
-                LastImportService oldLastImportService = _lastImportService;
+                LastImportRecord? lastImport = LastImportService.Load();
+                LastImportService oldLastImportService = LastImportService;
                 string newDirectory =
                     AppSettingsService.NormalizeStorageDirectory(selectedPath);
                 AppSettingsService.EnsureStorageOwnership(
@@ -1027,7 +1105,7 @@ namespace FattureViewer.ViewModels
                     "OMT");
                 if (string.Equals(
                         newDirectory,
-                        _supplierDatabase.StorageDirectory,
+                        SupplierDatabase.StorageDirectory,
                         StringComparison.OrdinalIgnoreCase))
                     return;
 
@@ -1041,7 +1119,7 @@ namespace FattureViewer.ViewModels
                     hydrateLegacyContent: false);
 
                 newSupplierDatabase.SaveInvoices(
-                    _supplierDatabase.GetAllInvoicesWithContent());
+                    SupplierDatabase.GetAllInvoicesWithContent());
                 newCustomerDatabase.SaveInvoices(
                     CustomerDatabase.GetAllInvoicesWithContent());
 
@@ -1050,7 +1128,7 @@ namespace FattureViewer.ViewModels
                     newLastImportService.Save(lastImport);
 
                 AppSettingsService.SetStorageDirectory(newDirectory);
-                _supplierDatabase.Dispose();
+                _supplierDatabase?.Dispose();
                 _customerDatabase?.Dispose();
                 _supplierDatabase = newSupplierDatabase;
                 _customerDatabase = newCustomerDatabase;
@@ -1432,7 +1510,7 @@ namespace FattureViewer.ViewModels
             LastImportRecord? record;
             try
             {
-                record = _lastImportService.Load();
+                record = LastImportService.Load();
             }
             catch (Exception ex)
             {
@@ -1491,7 +1569,7 @@ namespace FattureViewer.ViewModels
                     record,
                     ActiveSection,
                     ActivePermanentDatabase);
-                _lastImportService.Clear();
+                LastImportService.Clear();
                 SelectedInvoice = null;
                 LoadInvoices(refresh: true);
                 MessageBox.Show(
@@ -1593,12 +1671,12 @@ namespace FattureViewer.ViewModels
             int deleted = ActivePermanentDatabase.DeleteInvoices(invoiceIds);
             try
             {
-                if (_lastImportService.Load()?.Section == ActiveSection)
-                    _lastImportService.Clear();
+                if (LastImportService.Load()?.Section == ActiveSection)
+                    LastImportService.Clear();
             }
             catch
             {
-                _lastImportService.Clear();
+                LastImportService.Clear();
             }
 
             SelectedDeletionTarget = null;
@@ -1623,13 +1701,13 @@ namespace FattureViewer.ViewModels
             ActivePermanentDatabase.ClearAll();
             try
             {
-                if (_lastImportService.Load()?.Section == ActiveSection)
-                    _lastImportService.Clear();
+                if (LastImportService.Load()?.Section == ActiveSection)
+                    LastImportService.Clear();
             }
             catch
             {
                 // Svuotamento già eseguito: registro corrotto non può ripristinare dati.
-                _lastImportService.Clear();
+                LastImportService.Clear();
             }
             SelectedInvoice = null;
             LoadInvoices(refresh: true);
@@ -1677,7 +1755,7 @@ namespace FattureViewer.ViewModels
             if (_disposed)
                 return;
             _disposed = true;
-            _supplierDatabase.Dispose();
+            _supplierDatabase?.Dispose();
             _customerDatabase?.Dispose();
             _sessionDatabase?.Dispose();
         }

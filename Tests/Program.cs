@@ -282,6 +282,24 @@ nestedSelectionThread.Join();
 if (nestedSelectionError != null)
     throw nestedSelectionError;
 
+var viewModelStartupTimer = Stopwatch.StartNew();
+using (var startupViewModel = new MainViewModel())
+{
+    viewModelStartupTimer.Stop();
+    object? deferredSupplierDatabase = typeof(MainViewModel)
+        .GetField(
+            "_supplierDatabase",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)
+        ?.GetValue(startupViewModel);
+    Assert(
+        startupViewModel.IsInitialLoading && deferredSupplierDatabase == null,
+        "Il database Fornitori viene ancora aperto prima della visualizzazione della finestra.");
+}
+Assert(
+    viewModelStartupTimer.Elapsed < TimeSpan.FromMilliseconds(250),
+    $"Il costruttore iniziale blocca ancora l'avvio: {viewModelStartupTimer.ElapsedMilliseconds} ms.");
+
 var cachedInvoices = Enumerable.Range(0, 25000)
     .Select(index => new InvoiceData
     {

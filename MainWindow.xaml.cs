@@ -31,7 +31,10 @@ namespace FattureViewer
             }
 
             if (DataContext is MainViewModel viewModel)
+            {
                 viewModel.EnsureProfileSetup();
+                await viewModel.LoadInitialDataAsync();
+            }
 
             if (!_updateCheckStarted && UpdateService.TryBecomeUpdateOwner())
             {

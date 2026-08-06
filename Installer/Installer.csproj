@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationIcon>..\logo\logo.ico</ApplicationIcon>
-    <Version>5.0.1</Version>
+    <Version>5.0.2</Version>
   </PropertyGroup>
 
   <ItemGroup>

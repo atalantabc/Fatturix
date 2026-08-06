@@ -397,8 +397,24 @@
                          FontWeight="SemiBold"/>
             </TabControl>
             <ContentControl Grid.Row="1"
-                            Content="{Binding}"
+                            Content="{Binding WorkspaceContent}"
                             ContentTemplate="{StaticResource InvoiceWorkspaceTemplate}"/>
         </Grid>
+
+        <Border Grid.RowSpan="3"
+                Panel.ZIndex="20"
+                Background="#EFFFFFFF"
+                Visibility="{Binding IsInitialLoading, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Width="320">
+                <TextBlock Text="Caricamento fatture..."
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,14"/>
+                <ProgressBar IsIndeterminate="True" Height="8"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
