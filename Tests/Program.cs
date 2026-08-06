@@ -21,18 +21,31 @@ AppProfileDefinition omtProfile = AppProfileService.ParseProfile(
     new[] { "FattureViewer.exe", "--profile", "omt" });
 AppProfileDefinition ccaseProfile = AppProfileService.ParseProfile(
     new[] { "FattureViewer.exe", "--profile", "ccase" });
+AppProfileDefinition fuchsProfile = AppProfileService.ParseProfile(
+    new[] { "FattureViewer.exe", "--profile", "fuchs" });
 Assert(
     omtProfile.Kind == AppProfileKind.Omt &&
     omtProfile.SupportsPassiveArchive &&
     ccaseProfile.Kind == AppProfileKind.CCase &&
-    !ccaseProfile.SupportsPassiveArchive,
-    "I profili OMT e C.CASE non applicano le funzioni previste.");
+    !ccaseProfile.SupportsPassiveArchive &&
+    fuchsProfile.Kind == AppProfileKind.Fuchs &&
+    !fuchsProfile.SupportsPassiveArchive,
+    "I profili OMT, C.CASE e Fuchs non applicano le funzioni previste.");
+Assert(
+    omtProfile.CompanyVatNumber == "IT02745400164" &&
+    ccaseProfile.CompanyVatNumber == "IT03415270168" &&
+    fuchsProfile.CompanyVatNumber == "IT04127340166",
+    "Le Partite IVA dei profili non sono configurate correttamente.");
 Assert(
     !string.Equals(
         AppProfileService.GetPasswordFilePath(omtProfile),
         AppProfileService.GetPasswordFilePath(ccaseProfile),
+        StringComparison.OrdinalIgnoreCase) &&
+    !string.Equals(
+        AppProfileService.GetPasswordFilePath(ccaseProfile),
+        AppProfileService.GetPasswordFilePath(fuchsProfile),
         StringComparison.OrdinalIgnoreCase),
-    "OMT e C.CASE condividono la password database.");
+    "Due profili condividono la password database.");
 Assert(
     !string.Equals(
         AppSettingsService.GetDefaultStorageDirectory(
@@ -43,6 +56,39 @@ Assert(
             InvoiceSection.Customers),
         StringComparison.OrdinalIgnoreCase),
     "I database C.CASE Fornitori e Clienti usano la stessa cartella.");
+Assert(
+    !string.Equals(
+        AppSettingsService.GetDefaultStorageDirectory(
+            ccaseProfile,
+            InvoiceSection.Suppliers),
+        AppSettingsService.GetDefaultStorageDirectory(
+            fuchsProfile,
+            InvoiceSection.Suppliers),
+        StringComparison.OrdinalIgnoreCase) &&
+    AppSettingsService.GetStorageOwner(
+        fuchsProfile,
+        InvoiceSection.Customers) == "FUCHS-CLIENTI",
+    "C.CASE e Fuchs condividono cartelle o proprietÃ  del database.");
+Assert(
+    ProfileConfigurationService.IsValidCombination(
+        new[] { AppProfileKind.Omt }) &&
+    ProfileConfigurationService.IsValidCombination(
+        new[] { AppProfileKind.CCase }) &&
+    ProfileConfigurationService.IsValidCombination(
+        new[] { AppProfileKind.Omt, AppProfileKind.CCase }) &&
+    ProfileConfigurationService.IsValidCombination(
+        new[] { AppProfileKind.Fuchs }) &&
+    !ProfileConfigurationService.IsValidCombination(
+        Array.Empty<AppProfileKind>()) &&
+    !ProfileConfigurationService.IsValidCombination(
+        new[] { AppProfileKind.Fuchs, AppProfileKind.Omt }),
+    "Le regole di compatibilitÃ  dei profili non sono rispettate.");
+Assert(
+    ProfileConfigurationService.DetectExistingProfiles(true, true, false)
+        .SequenceEqual(new[] { AppProfileKind.Omt, AppProfileKind.CCase }) &&
+    ProfileConfigurationService.DetectExistingProfiles(false, false, true)
+        .SequenceEqual(new[] { AppProfileKind.Fuchs }),
+    "La migrazione automatica dei profili esistenti Ã¨ errata.");
 
 string profileIsolationRoot = Path.Combine(
     Path.GetTempPath(),
@@ -147,6 +193,56 @@ static InvoiceData TestInvoice(
         Section = section.ToStorageValue(),
         FileContent = System.Text.Encoding.UTF8.GetBytes(sender)
     };
+}
+
+string startupOptimizationRoot = Path.Combine(
+    Path.GetTempPath(),
+    "FattureViewerStartupTests_" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(startupOptimizationRoot);
+try
+{
+    using (var seed = new DatabaseService(
+               startupOptimizationRoot,
+               migrateLegacyDatabase: false,
+               databaseFileName: "startup.db",
+               hydrateLegacyContent: false))
+    {
+        seed.SaveInvoice(new InvoiceData
+        {
+            Id = "backfill-test",
+            FileName = "backfill.xml",
+            FileContent = CreateInvoiceXml(
+                "A 7/2026",
+                "FORNITORE",
+                "IT12345678901",
+                "OMT",
+                omtProfile.CompanyVatNumber),
+            InvoiceNumber = string.Empty
+        });
+    }
+
+    using (var firstOpen = new DatabaseService(
+               startupOptimizationRoot,
+               migrateLegacyDatabase: false,
+               databaseFileName: "startup.db"))
+    {
+        Assert(
+            firstOpen.GetAllInvoices().Single().InvoiceNumber == "A 7/2026",
+            "Il recupero iniziale dei numeri fattura non funziona.");
+    }
+
+    using var metadataDatabase = new SQLiteConnection(
+        Path.Combine(startupOptimizationRoot, "startup.db"));
+    Assert(
+        metadataDatabase.ExecuteScalar<string>(
+            "SELECT [Value] FROM AppMetadata WHERE [Key] = ?",
+            "InvoiceNumberBackfillVersion") == "1",
+        "L'ottimizzazione di avvio non memorizza il completamento del recupero.");
+}
+finally
+{
+    if (Directory.Exists(startupOptimizationRoot))
+        Directory.Delete(startupOptimizationRoot, true);
 }
 
 Exception? nestedSelectionError = null;
@@ -486,17 +582,43 @@ try
         "Fatture nella sezione corretta vengono segnalate.");
     Assert(
         ImportSafetyService.IsReferenceParty(
-            "",
-            "O M T di Terzi G.") &&
-        ImportSafetyService.IsReferenceParty(
             "02745400164",
-            "nome differente"),
-        "Le varianti ragione sociale o P.IVA senza prefisso non vengono riconosciute.");
+            "nome differente") &&
+        !ImportSafetyService.IsReferenceParty(
+            "",
+            omtName),
+        "Il controllo non usa la P.IVA come identificativo principale.");
     Assert(
         !ImportSafetyService.IsReferenceParty(
             "IT99999999999",
             omtName),
         "Una P.IVA diversa viene ignorata nonostante sia il riferimento principale.");
+    foreach (string companyVat in new[]
+             {
+                 omtProfile.CompanyVatNumber,
+                 ccaseProfile.CompanyVatNumber,
+                 fuchsProfile.CompanyVatNumber
+             })
+    {
+        Assert(
+            ImportSafetyService.IsSuspicious(
+                new InvoiceData { RecipientVatNumber = companyVat },
+                InvoiceSection.Customers,
+                companyVat) &&
+            ImportSafetyService.IsSuspicious(
+                new InvoiceData { SenderVatNumber = companyVat },
+                InvoiceSection.Suppliers,
+                companyVat),
+            $"Allarme P.IVA non funzionante per {companyVat}.");
+    }
+    Assert(
+        ImportSafetyService.IsReferenceVat(
+            "034 1527 0168",
+            ccaseProfile.CompanyVatNumber) &&
+        ImportSafetyService.IsReferenceVat(
+            "IT-04127340166",
+            fuchsProfile.CompanyVatNumber),
+        "L'allarme non normalizza prefisso, spazi o separatori della P.IVA.");
 
     List<InvoiceData> mixedInvoices = misplacedCustomers
         .Concat(supplierInvoices)

@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
-using System.Text;
 using FattureViewer.Models;
 
 namespace FattureViewer.Services
@@ -28,24 +26,28 @@ namespace FattureViewer.Services
 
         public static List<InvoiceData> GetSuspiciousInvoices(
             IEnumerable<InvoiceData> invoices,
-            InvoiceSection targetSection)
+            InvoiceSection targetSection,
+            string? referenceVatNumber = null)
         {
             return invoices
-                .Where(invoice => IsSuspicious(invoice, targetSection))
+                .Where(invoice => IsSuspicious(
+                    invoice,
+                    targetSection,
+                    referenceVatNumber))
                 .ToList();
         }
 
         public static bool IsSuspicious(
             InvoiceData invoice,
-            InvoiceSection targetSection)
+            InvoiceSection targetSection,
+            string? referenceVatNumber = null)
         {
+            string companyVat = string.IsNullOrWhiteSpace(referenceVatNumber)
+                ? AppProfileService.Current.CompanyVatNumber
+                : referenceVatNumber;
             return targetSection == InvoiceSection.Suppliers
-                ? IsReferenceParty(invoice.SenderVatNumber, invoice.SenderName)
-                : IsReferenceParty(
-                    invoice.RecipientVatNumber,
-                    string.IsNullOrWhiteSpace(invoice.RecipientName)
-                        ? invoice.CompanyName
-                        : invoice.RecipientName);
+                ? IsReferenceVat(invoice.SenderVatNumber, companyVat)
+                : IsReferenceVat(invoice.RecipientVatNumber, companyVat);
         }
 
         public static List<InvoiceData>? ResolveImport(
@@ -78,60 +80,38 @@ namespace FattureViewer.Services
 
         public static bool IsReferenceParty(string? vatNumber, string? companyName)
         {
+            return IsReferenceVat(
+                vatNumber,
+                AppProfileService.Current.CompanyVatNumber);
+        }
+
+        public static bool IsReferenceVat(
+            string? vatNumber,
+            string referenceVatNumber)
+        {
             string normalizedVat = NormalizeAlphaNumeric(vatNumber);
-            string referenceVat = NormalizeAlphaNumeric(ReferenceVatNumber);
-            if (!string.IsNullOrEmpty(normalizedVat))
-            {
-                return normalizedVat == referenceVat ||
-                       normalizedVat == referenceVat.Substring(2);
-            }
+            string referenceVat = NormalizeAlphaNumeric(referenceVatNumber);
+            if (string.IsNullOrEmpty(normalizedVat) ||
+                string.IsNullOrEmpty(referenceVat))
+                return false;
 
-            string normalizedName = NormalizeAlphaNumeric(companyName);
-            string referenceName = NormalizeAlphaNumeric(ReferenceCompanyName);
-            if (normalizedName == referenceName)
-                return true;
-
-            if (normalizedName.StartsWith("OMT", StringComparison.Ordinal) &&
-                normalizedName.Contains("TERZI", StringComparison.Ordinal) &&
-                (normalizedName.Contains("GIANANTONIO", StringComparison.Ordinal) ||
-                 normalizedName.EndsWith("G", StringComparison.Ordinal)))
-                return true;
-
-            return normalizedName.Length >= 18 &&
-                   EditDistance(normalizedName, referenceName) <= 2;
+            return RemoveItalianPrefix(normalizedVat) ==
+                   RemoveItalianPrefix(referenceVat);
         }
 
         private static string NormalizeAlphaNumeric(string? value)
         {
-            string decomposed = (value ?? string.Empty)
-                .Normalize(NormalizationForm.FormD);
-            return new string(decomposed
-                .Where(character =>
-                    CharUnicodeInfo.GetUnicodeCategory(character) !=
-                    UnicodeCategory.NonSpacingMark)
+            return new string((value ?? string.Empty)
                 .Where(char.IsLetterOrDigit)
                 .Select(char.ToUpperInvariant)
                 .ToArray());
         }
 
-        private static int EditDistance(string first, string second)
+        private static string RemoveItalianPrefix(string vatNumber)
         {
-            var previous = Enumerable.Range(0, second.Length + 1).ToArray();
-            var current = new int[second.Length + 1];
-            for (int row = 1; row <= first.Length; row++)
-            {
-                current[0] = row;
-                for (int column = 1; column <= second.Length; column++)
-                {
-                    int substitution = previous[column - 1] +
-                        (first[row - 1] == second[column - 1] ? 0 : 1);
-                    current[column] = Math.Min(
-                        Math.Min(previous[column] + 1, current[column - 1] + 1),
-                        substitution);
-                }
-                (previous, current) = (current, previous);
-            }
-            return previous[second.Length];
+            return vatNumber.StartsWith("IT", StringComparison.Ordinal)
+                ? vatNumber.Substring(2)
+                : vatNumber;
         }
     }
 }

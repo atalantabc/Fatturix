@@ -10,8 +10,6 @@ namespace FattureViewer.Services
     {
         private const string LegacyRegistryPath =
             @"HKEY_CURRENT_USER\Software\FattureViewer";
-        private const string CCaseRegistryPath =
-            @"HKEY_CURRENT_USER\Software\FattureViewer\Profiles\CCASE";
         private const string StorageDirectoryValue = "InternalStorageDirectory";
         private const string SupplierStorageDirectoryValue =
             "SupplierStorageDirectory";
@@ -165,7 +163,7 @@ namespace FattureViewer.Services
             string directory,
             string expectedOwner)
         {
-            if (AppProfileService.Current.Kind == AppProfileKind.CCase)
+            if (AppProfileService.Current.Kind != AppProfileKind.Omt)
                 TryMarkLegacyOmtStorage();
 
             string normalized = NormalizeStorageDirectory(directory);
@@ -227,15 +225,16 @@ namespace FattureViewer.Services
                 : CustomerStorageDirectoryValue;
         }
 
-        private static string GetStorageOwner(
+        public static string GetStorageOwner(
             AppProfileDefinition profile,
             InvoiceSection section)
         {
             if (profile.Kind == AppProfileKind.Omt)
                 return "OMT";
-            return section == InvoiceSection.Suppliers
-                ? "C.CASE-FORNITORI"
-                : "C.CASE-CLIENTI";
+            return $"{profile.Id.ToUpperInvariant()}-" +
+                   (section == InvoiceSection.Suppliers
+                       ? "FORNITORI"
+                       : "CLIENTI");
         }
 
         private static IEnumerable<(string Path, string Owner)>
@@ -252,26 +251,33 @@ namespace FattureViewer.Services
                     : omtPath,
                 "OMT");
 
-            AppProfileDefinition ccase = AppProfileService.Create(AppProfileKind.CCase);
-            string? supplierPath = Registry.GetValue(
-                CCaseRegistryPath,
-                SupplierStorageDirectoryValue,
-                null) as string;
-            yield return (
-                string.IsNullOrWhiteSpace(supplierPath)
-                    ? GetDefaultStorageDirectory(ccase, InvoiceSection.Suppliers)
-                    : supplierPath,
-                "C.CASE-FORNITORI");
+            foreach (AppProfileKind kind in new[]
+                     {
+                         AppProfileKind.CCase,
+                         AppProfileKind.Fuchs
+                     })
+            {
+                AppProfileDefinition profile = AppProfileService.Create(kind);
+                string? supplierPath = Registry.GetValue(
+                    profile.RegistryPath,
+                    SupplierStorageDirectoryValue,
+                    null) as string;
+                yield return (
+                    string.IsNullOrWhiteSpace(supplierPath)
+                        ? GetDefaultStorageDirectory(profile, InvoiceSection.Suppliers)
+                        : supplierPath,
+                    GetStorageOwner(profile, InvoiceSection.Suppliers));
 
-            string? customerPath = Registry.GetValue(
-                CCaseRegistryPath,
-                CustomerStorageDirectoryValue,
-                null) as string;
-            yield return (
-                string.IsNullOrWhiteSpace(customerPath)
-                    ? GetDefaultStorageDirectory(ccase, InvoiceSection.Customers)
-                    : customerPath,
-                "C.CASE-CLIENTI");
+                string? customerPath = Registry.GetValue(
+                    profile.RegistryPath,
+                    CustomerStorageDirectoryValue,
+                    null) as string;
+                yield return (
+                    string.IsNullOrWhiteSpace(customerPath)
+                        ? GetDefaultStorageDirectory(profile, InvoiceSection.Customers)
+                        : customerPath,
+                    GetStorageOwner(profile, InvoiceSection.Customers));
+            }
         }
 
         private static bool PathsEqual(string first, string second)

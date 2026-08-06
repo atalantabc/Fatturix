@@ -67,6 +67,10 @@
                                    FontWeight="SemiBold"
                                    TextWrapping="Wrap"/>
                     </Border>
+                    <Separator Margin="0,14"/>
+                    <Button Content="Configurazione Profili..."
+                            HorizontalAlignment="Left" Padding="14,8"
+                            Click="ProfileConfigurationButton_Click"/>
                 </StackPanel>
             </Border>
             <TextBlock Grid.Row="2"

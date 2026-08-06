@@ -234,6 +234,17 @@ RecipientCode, InvoiceNumber, TotalAmount, Section FROM InvoiceData";
 
         private void BackfillMissingInvoiceNumbers()
         {
+            const string metadataKey = "InvoiceNumberBackfillVersion";
+            _db.Execute(
+                "CREATE TABLE IF NOT EXISTS AppMetadata ([Key] TEXT PRIMARY KEY, [Value] TEXT)");
+            string? completedVersion = _db.ExecuteScalar<string>(
+                "SELECT [Value] FROM AppMetadata WHERE [Key] = ?",
+                metadataKey);
+            if (completedVersion == "1")
+                return;
+            if (!_db.Table<InvoiceData>().Any())
+                return;
+
             List<InvoiceData> missing = _db.Query<InvoiceData>(
                 "SELECT * FROM InvoiceData WHERE InvoiceNumber IS NULL OR trim(InvoiceNumber) = ''");
             var recovered = new List<InvoiceData>();
@@ -253,6 +264,10 @@ RecipientCode, InvoiceNumber, TotalAmount, Section FROM InvoiceData";
             }
             if (recovered.Count > 0)
                 _db.RunInTransaction(() => recovered.ForEach(invoice => _db.Update(invoice)));
+            _db.Execute(
+                "INSERT OR REPLACE INTO AppMetadata ([Key], [Value]) VALUES (?, ?)",
+                metadataKey,
+                "1");
         }
 
         private void ImportLegacyDatabase()

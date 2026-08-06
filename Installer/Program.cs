@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.Win32;
 
 namespace FattureViewerInstaller
 {
@@ -213,41 +214,90 @@ namespace FattureViewerInstaller
 
         private static void EnsureShortcuts(string applicationPath, bool silent)
         {
+            string[]? enabledProfiles = GetEnabledProfiles();
             string desktopDirectory =
                 Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-            DeleteIfExists(Path.Combine(desktopDirectory, "FattureViewer.lnk"));
-            CreateShortcut(
+            SyncShortcutDirectory(
                 applicationPath,
-                Path.Combine(desktopDirectory, "FattureViewer OMT.lnk"),
-                "--profile omt",
-                "FattureViewer - Profilo OMT",
-                silent);
-            CreateShortcut(
-                applicationPath,
-                Path.Combine(desktopDirectory, "FattureViewer C.CASE.lnk"),
-                "--profile ccase",
-                "FattureViewer - Profilo C.CASE",
+                desktopDirectory,
+                enabledProfiles,
                 silent);
 
             string startMenuDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
                 "Programs");
             if (Directory.Exists(startMenuDirectory))
-            {
-                DeleteIfExists(Path.Combine(startMenuDirectory, "FattureViewer.lnk"));
-                CreateShortcut(
+                SyncShortcutDirectory(
                     applicationPath,
-                    Path.Combine(startMenuDirectory, "FattureViewer OMT.lnk"),
-                    "--profile omt",
-                    "FattureViewer - Profilo OMT",
+                    startMenuDirectory,
+                    enabledProfiles,
                     silent);
+        }
+
+        private static void SyncShortcutDirectory(
+            string applicationPath,
+            string directory,
+            string[]? enabledProfiles,
+            bool silent)
+        {
+            foreach (string name in new[]
+                     {
+                         "FattureViewer.lnk",
+                         "FattureViewer OMT.lnk",
+                         "FattureViewer C.CASE.lnk",
+                         "FattureViewer Fuchs.lnk"
+                     })
+                DeleteIfExists(Path.Combine(directory, name));
+
+            if (enabledProfiles == null)
+            {
                 CreateShortcut(
                     applicationPath,
-                    Path.Combine(startMenuDirectory, "FattureViewer C.CASE.lnk"),
-                    "--profile ccase",
-                    "FattureViewer - Profilo C.CASE",
+                    Path.Combine(directory, "FattureViewer.lnk"),
+                    string.Empty,
+                    "FattureViewer - Configurazione profili",
+                    silent);
+                return;
+            }
+
+            foreach (string profile in enabledProfiles)
+            {
+                string label = profile switch
+                {
+                    "ccase" => "C.CASE",
+                    "fuchs" => "Fuchs",
+                    _ => "OMT"
+                };
+                CreateShortcut(
+                    applicationPath,
+                    Path.Combine(directory, $"FattureViewer {label}.lnk"),
+                    $"--profile {profile}",
+                    $"FattureViewer - Profilo {label}",
                     silent);
             }
+        }
+
+        private static string[]? GetEnabledProfiles()
+        {
+            const string registryPath =
+                @"HKEY_CURRENT_USER\Software\FattureViewer\ProfileConfiguration";
+            if (Registry.GetValue(registryPath, "Configured", 0) is not int configured ||
+                configured == 0)
+                return null;
+
+            string value = Registry.GetValue(
+                registryPath,
+                "EnabledProfiles",
+                string.Empty) as string ?? string.Empty;
+            string[] profiles = value.Split(
+                    ';',
+                    StringSplitOptions.RemoveEmptyEntries |
+                    StringSplitOptions.TrimEntries)
+                .Select(profile => profile.ToLowerInvariant())
+                .Where(profile => profile is "omt" or "ccase" or "fuchs")
+                .Distinct()
+                .ToArray();
+            return profiles.Length == 0 ? null : profiles;
         }
 
         private static void CreateShortcut(
@@ -295,11 +345,11 @@ namespace FattureViewerInstaller
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = applicationPath,
-                    Arguments = profile.Equals(
-                        "ccase",
-                        StringComparison.OrdinalIgnoreCase)
+                    Arguments = profile.Equals("ccase", StringComparison.OrdinalIgnoreCase)
                         ? "--profile ccase"
-                        : "--profile omt",
+                        : profile.Equals("fuchs", StringComparison.OrdinalIgnoreCase)
+                            ? "--profile fuchs"
+                            : "--profile omt",
                     WorkingDirectory = Path.GetDirectoryName(applicationPath)!,
                     UseShellExecute = true
                 });

@@ -20,9 +20,9 @@ namespace FattureViewer.ViewModels
         private const string CustomerDatabaseFileName = "fattureClienti.db";
 
         private DatabaseService _supplierDatabase;
-        private DatabaseService _customerDatabase;
+        private DatabaseService? _customerDatabase;
         private LastImportService _lastImportService;
-        private readonly SessionDatabaseService _sessionDatabase;
+        private SessionDatabaseService? _sessionDatabase;
         private readonly Dictionary<InvoiceSection, List<InvoiceData>> _invoiceCache = new();
         private readonly Dictionary<InvoiceSection, ObservableCollection<TreeItemNode>> _treeCache = new();
         private bool _disposed;
@@ -33,19 +33,10 @@ namespace FattureViewer.ViewModels
             _supplierDatabase = new DatabaseService(
                 AppSettingsService.GetStorageDirectory(
                     InvoiceSection.Suppliers));
-            _customerDatabase = new DatabaseService(
-                AppSettingsService.GetStorageDirectory(
-                    InvoiceSection.Customers),
-                migrateLegacyDatabase: false,
-                databaseFileName: CustomerDatabaseFileName,
-                hydrateLegacyContent: false);
             _lastImportService = new LastImportService(
                 AppProfileService.Current.Kind == AppProfileKind.Omt
                     ? _supplierDatabase.StorageDirectory
                     : AppProfileService.GetProfileDataDirectory());
-            _sessionDatabase = new SessionDatabaseService(
-                AppProfileService.GetSessionDirectory());
-
             ImportCommand = new RelayCommand(ExecuteImport);
             ImportDatabaseCommand = new RelayCommand(ExecuteImportDatabase);
             ClearCommand = new RelayCommand(ExecuteClear);
@@ -59,9 +50,7 @@ namespace FattureViewer.ViewModels
             IsAdminDeletionEnabled =
                 AppSettingsService.IsAdminDeletionEnabled();
 
-            RefreshInvoiceCache(InvoiceSection.Suppliers);
-            RefreshInvoiceCache(InvoiceSection.Customers);
-            FilterInvoices();
+            LoadInvoices();
         }
 
         public ObservableCollection<InvoiceData> Invoices { get; private set; } =
@@ -316,8 +305,23 @@ namespace FattureViewer.ViewModels
                 : InvoiceSection.Suppliers;
 
         private DatabaseService ActivePermanentDatabase =>
-            ActiveSection == InvoiceSection.Customers
-                ? _customerDatabase
+            GetPermanentDatabase(ActiveSection);
+
+        private DatabaseService CustomerDatabase =>
+            _customerDatabase ??= new DatabaseService(
+                AppSettingsService.GetStorageDirectory(
+                    InvoiceSection.Customers),
+                migrateLegacyDatabase: false,
+                databaseFileName: CustomerDatabaseFileName,
+                hydrateLegacyContent: false);
+
+        private SessionDatabaseService SessionDatabase =>
+            _sessionDatabase ??= new SessionDatabaseService(
+                AppProfileService.GetSessionDirectory());
+
+        private DatabaseService GetPermanentDatabase(InvoiceSection section) =>
+            section == InvoiceSection.Customers
+                ? CustomerDatabase
                 : _supplierDatabase;
 
         private void LoadInvoices(bool refresh = false)
@@ -329,9 +333,7 @@ namespace FattureViewer.ViewModels
 
         private void RefreshInvoiceCache(InvoiceSection section)
         {
-            DatabaseService database = section == InvoiceSection.Customers
-                ? _customerDatabase
-                : _supplierDatabase;
+            DatabaseService database = GetPermanentDatabase(section);
             List<InvoiceData> invoices = database.GetAllInvoices();
             foreach (InvoiceData invoice in invoices)
             {
@@ -339,7 +341,8 @@ namespace FattureViewer.ViewModels
                 PrepareForDisplay(invoice, section);
             }
 
-            List<InvoiceData> temporary = _sessionDatabase.GetInvoices(section);
+            List<InvoiceData> temporary = _sessionDatabase?.GetInvoices(section) ??
+                                          new List<InvoiceData>();
             foreach (InvoiceData invoice in temporary)
                 PrepareForDisplay(invoice, section);
             invoices.AddRange(temporary);
@@ -874,9 +877,7 @@ namespace FattureViewer.ViewModels
             List<InvoiceData> invoices,
             string sectionName)
         {
-            DatabaseService database = section == InvoiceSection.Customers
-                ? _customerDatabase
-                : _supplierDatabase;
+            DatabaseService database = GetPermanentDatabase(section);
             DatabaseImportChanges changes =
                 database.SaveInvoicesForRollback(invoices);
             try
@@ -950,7 +951,7 @@ namespace FattureViewer.ViewModels
             InvoiceSection section,
             List<InvoiceData> invoices)
         {
-            _sessionDatabase.SaveInvoices(section, invoices);
+            SessionDatabase.SaveInvoices(section, invoices);
             LoadInvoices(refresh: true);
             ShowImportCompleted(
                 invoices.Count,
@@ -1000,7 +1001,7 @@ namespace FattureViewer.ViewModels
 
         private void ExecuteSetDatabasePath(object obj)
         {
-            if (AppProfileService.Current.Kind == AppProfileKind.CCase)
+            if (AppProfileService.Current.Kind != AppProfileKind.Omt)
             {
                 PromptAndSetProfileDatabasePath(ActiveSection, initialSetup: false);
                 return;
@@ -1042,7 +1043,7 @@ namespace FattureViewer.ViewModels
                 newSupplierDatabase.SaveInvoices(
                     _supplierDatabase.GetAllInvoicesWithContent());
                 newCustomerDatabase.SaveInvoices(
-                    _customerDatabase.GetAllInvoicesWithContent());
+                    CustomerDatabase.GetAllInvoicesWithContent());
 
                 var newLastImportService = new LastImportService(newDirectory);
                 if (lastImport != null)
@@ -1050,7 +1051,7 @@ namespace FattureViewer.ViewModels
 
                 AppSettingsService.SetStorageDirectory(newDirectory);
                 _supplierDatabase.Dispose();
-                _customerDatabase.Dispose();
+                _customerDatabase?.Dispose();
                 _supplierDatabase = newSupplierDatabase;
                 _customerDatabase = newCustomerDatabase;
                 _lastImportService = newLastImportService;
@@ -1088,7 +1089,7 @@ namespace FattureViewer.ViewModels
 
         public void EnsureProfileSetup()
         {
-            if (AppProfileService.Current.Kind != AppProfileKind.CCase)
+            if (AppProfileService.Current.Kind == AppProfileKind.Omt)
                 return;
 
             foreach (InvoiceSection section in new[]
@@ -1106,15 +1107,13 @@ namespace FattureViewer.ViewModels
             InvoiceSection section,
             bool initialSetup)
         {
-            DatabaseService currentDatabase = section == InvoiceSection.Suppliers
-                ? _supplierDatabase
-                : _customerDatabase;
+            DatabaseService currentDatabase = GetPermanentDatabase(section);
             string sectionName = section.ToStorageValue();
             string selectedPath = Microsoft.VisualBasic.Interaction.InputBox(
-                $"Inserisci la cartella del database {sectionName} per il profilo C.CASE. " +
+                $"Inserisci la cartella del database {sectionName} per il profilo {ProfileName}. " +
                 "Sono supportati anche percorsi di rete:",
                 initialSetup
-                    ? $"Configurazione C.CASE - {sectionName}"
+                    ? $"Configurazione {ProfileName} - {sectionName}"
                     : $"Percorso database {sectionName}",
                 currentDatabase.StorageDirectory);
             if (string.IsNullOrWhiteSpace(selectedPath))
@@ -1127,9 +1126,9 @@ namespace FattureViewer.ViewModels
                     AppSettingsService.NormalizeStorageDirectory(selectedPath);
                 AppSettingsService.EnsureStorageOwnership(
                     newDirectory,
-                    section == InvoiceSection.Suppliers
-                        ? "C.CASE-FORNITORI"
-                        : "C.CASE-CLIENTI");
+                    AppSettingsService.GetStorageOwner(
+                        AppProfileService.Current,
+                        section));
 
                 if (string.Equals(
                         newDirectory,
@@ -1167,7 +1166,7 @@ namespace FattureViewer.ViewModels
                 }
 
                 MessageBox.Show(
-                    $"Percorso database {sectionName} salvato per C.CASE:\n\n" +
+                    $"Percorso database {sectionName} salvato per {ProfileName}:\n\n" +
                     newDirectory,
                     "Percorso database",
                     MessageBoxButton.OK,
@@ -1177,7 +1176,7 @@ namespace FattureViewer.ViewModels
             {
                 MessageBox.Show(
                     "Impossibile usare il percorso indicato. La cartella non deve appartenere " +
-                    "a OMT o all'altro database C.CASE.\n\n" + ex.Message,
+                    "a un altro profilo o all'altro database dello stesso profilo.\n\n" + ex.Message,
                     "Errore percorso database",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -1649,7 +1648,7 @@ namespace FattureViewer.ViewModels
             try
             {
                 byte[]? bytes = SelectedInvoice.IsTemporary
-                    ? _sessionDatabase.GetInvoiceContent(SelectedInvoice.Id)
+                    ? SessionDatabase.GetInvoiceContent(SelectedInvoice.Id)
                     : ActivePermanentDatabase.GetInvoiceContent(
                         SelectedInvoice.Id);
                 InvoiceDocumentContent content = InvoiceDocumentService.Render(
@@ -1679,8 +1678,8 @@ namespace FattureViewer.ViewModels
                 return;
             _disposed = true;
             _supplierDatabase.Dispose();
-            _customerDatabase.Dispose();
-            _sessionDatabase.Dispose();
+            _customerDatabase?.Dispose();
+            _sessionDatabase?.Dispose();
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

@@ -8,7 +8,8 @@ namespace FattureViewer.Services
     public enum AppProfileKind
     {
         Omt,
-        CCase
+        CCase,
+        Fuchs
     }
 
     public sealed class AppProfileDefinition
@@ -17,6 +18,7 @@ namespace FattureViewer.Services
         public string Id { get; init; } = "omt";
         public string DisplayName { get; init; } = "OMT";
         public bool SupportsPassiveArchive { get; init; }
+        public string CompanyVatNumber { get; init; } = string.Empty;
         public string RegistryPath { get; init; } =
             @"HKEY_CURRENT_USER\Software\FattureViewer";
     }
@@ -36,10 +38,11 @@ namespace FattureViewer.Services
                         StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (arguments[index + 1].Equals(
-                        "ccase",
-                        StringComparison.OrdinalIgnoreCase))
+                string profileId = arguments[index + 1];
+                if (profileId.Equals("ccase", StringComparison.OrdinalIgnoreCase))
                     return Create(AppProfileKind.CCase);
+                if (profileId.Equals("fuchs", StringComparison.OrdinalIgnoreCase))
+                    return Create(AppProfileKind.Fuchs);
                 break;
             }
             return Create(AppProfileKind.Omt);
@@ -47,25 +50,39 @@ namespace FattureViewer.Services
 
         public static AppProfileDefinition Create(AppProfileKind kind)
         {
-            return kind == AppProfileKind.CCase
-                ? new AppProfileDefinition
+            return kind switch
+            {
+                AppProfileKind.CCase => new AppProfileDefinition
                 {
                     Kind = kind,
                     Id = "ccase",
-                    DisplayName = "C.CASE",
+                    DisplayName = "C.CASE SRL",
                     SupportsPassiveArchive = false,
+                    CompanyVatNumber = "IT03415270168",
                     RegistryPath =
                         @"HKEY_CURRENT_USER\Software\FattureViewer\Profiles\CCASE"
-                }
-                : new AppProfileDefinition
+                },
+                AppProfileKind.Fuchs => new AppProfileDefinition
+                {
+                    Kind = kind,
+                    Id = "fuchs",
+                    DisplayName = "Fuchs Stahlrohre Srl",
+                    SupportsPassiveArchive = false,
+                    CompanyVatNumber = "IT04127340166",
+                    RegistryPath =
+                        @"HKEY_CURRENT_USER\Software\FattureViewer\Profiles\FUCHS"
+                },
+                _ => new AppProfileDefinition
                 {
                     Kind = AppProfileKind.Omt,
                     Id = "omt",
-                    DisplayName = "OMT",
+                    DisplayName = "OMT di Terzi Gian Antonio",
                     SupportsPassiveArchive = true,
+                    CompanyVatNumber = "IT02745400164",
                     RegistryPath =
                         @"HKEY_CURRENT_USER\Software\FattureViewer"
-                };
+                }
+            };
         }
 
         public static string GetProfileDataDirectory(
@@ -79,7 +96,7 @@ namespace FattureViewer.Services
                         Environment.SpecialFolder.LocalApplicationData),
                     "FattureViewer",
                     "Profiles",
-                    "CCASE");
+                    profile.Id.ToUpperInvariant());
         }
 
         public static string GetPasswordFilePath(

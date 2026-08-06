@@ -1,0 +1,54 @@
+<Window x:Class="FattureViewer.ProfileConfigurationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Configurazione Profili" Height="430" Width="560"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Background="#F5F6F8" FontFamily="Segoe UI" Icon="logo/logo50.png">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="HeadingText" Text="Configura i profili aziendali"
+                   FontSize="22" FontWeight="Bold"/>
+        <TextBlock Grid.Row="1" Margin="0,8,0,20" Foreground="#555"
+                   TextWrapping="Wrap"
+                   Text="Seleziona i profili disponibili su questo computer. OMT e C.CASE possono convivere; Fuchs richiede un'installazione dedicata."/>
+        <Border Grid.Row="2" Padding="20" Background="White"
+                BorderBrush="#DDD" BorderThickness="1" CornerRadius="6">
+            <StackPanel>
+                <CheckBox x:Name="OmtCheckBox"
+                          Content="OMT di Terzi Gian Antonio"
+                          FontSize="16" Margin="0,5,0,14"
+                          Checked="StandardProfileChanged"
+                          Unchecked="StandardProfileChanged"/>
+                <CheckBox x:Name="CCaseCheckBox"
+                          Content="C.CASE SRL"
+                          FontSize="16" Margin="0,5,0,14"
+                          Checked="StandardProfileChanged"
+                          Unchecked="StandardProfileChanged"/>
+                <Separator Margin="0,5,0,14"/>
+                <CheckBox x:Name="FuchsCheckBox"
+                          Content="Fuchs Stahlrohre Srl (installazione dedicata)"
+                          FontSize="16" FontWeight="SemiBold"
+                          Checked="FuchsProfileChanged"
+                          Unchecked="FuchsProfileChanged"/>
+                <TextBlock x:Name="ValidationText" Margin="0,18,0,0"
+                           Foreground="#B00020" FontWeight="SemiBold"
+                           Visibility="Collapsed"
+                           Text="Seleziona almeno un profilo valido."/>
+            </StackPanel>
+        </Border>
+        <StackPanel Grid.Row="3" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Salva" Width="120" Padding="9"
+                    Background="#0078D7" Foreground="White"
+                    BorderThickness="0" Click="SaveButton_Click"/>
+            <Button x:Name="CancelButton" Content="Annulla" Width="120"
+                    Padding="9" Margin="12,0,0,0"
+                    Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

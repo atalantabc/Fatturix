@@ -1,5 +1,7 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
+using FattureViewer.Services;
 
 namespace FattureViewer
 {
@@ -81,6 +83,41 @@ namespace FattureViewer
         {
             DialogResult = false;
             Close();
+        }
+
+        private void ProfileConfigurationButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var configured = ProfileConfigurationService.GetConfiguredProfiles() ??
+                             new[] { AppProfileService.Current.Kind };
+            var window = new ProfileConfigurationWindow(configured)
+            {
+                Owner = this
+            };
+            if (window.ShowDialog() != true)
+                return;
+
+            ProfileConfigurationService.Save(window.SelectedProfiles);
+            try
+            {
+                ProfileShortcutService.Sync(window.SelectedProfiles);
+            }
+            catch
+            {
+                // La configurazione Ã¨ salvata anche se un collegamento Ã¨ occupato.
+            }
+
+            string restartMessage = window.SelectedProfiles.Contains(
+                AppProfileService.Current.Kind)
+                ? string.Empty
+                : "\n\nIl profilo attuale Ã¨ stato disattivato: chiudi questa finestra e riavvia FattureViewer.";
+            MessageBox.Show(
+                "Configurazione profili salvata. I collegamenti sono stati aggiornati." +
+                restartMessage,
+                "Configurazione Profili",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
     }
 }
